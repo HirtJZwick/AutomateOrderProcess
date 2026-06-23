@@ -20,3 +20,6 @@ output.txt
 # Editor
 .vscode/
 .idea/
+
+# Individual files
+run_python.ps1
