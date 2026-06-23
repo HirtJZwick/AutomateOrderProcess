@@ -19,7 +19,11 @@ from __future__ import annotations
 import os
 import sys
 
+# Core extraction modules live in the parent directory.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import extract_checklist
+import extract_order_pdf
 import storage
 import update_fat_plan
 
@@ -39,6 +43,16 @@ def run(docx_path: str | None = None) -> int:
         return 7
     print(f"      Extracted {len(data)} fields for dossier {data['dossier_no']}.")
 
+    # Enrich with the Order Confirmation PDF (ZwickRoell contacts: RSM, Logistics).
+    src_dir = os.path.dirname(os.path.abspath(path))
+    order_pdf = extract_order_pdf.find_order_pdf(src_dir)
+    if order_pdf:
+        pdf_data = extract_order_pdf.extract(order_pdf)
+        data.update(pdf_data)
+        print(f"      Merged {len(pdf_data)} fields from {os.path.basename(order_pdf)}.")
+    else:
+        print("      No 'Order' PDF found to enrich contacts (skipping).")
+
     print("[2/3] Staging to SQLite (eric_orders.db)")
     key = storage.store(data)
     print(f"      Upserted order {key}.")
@@ -51,7 +65,7 @@ def run(docx_path: str | None = None) -> int:
     if not xlsx:
         print("ERROR: FAT_INSTALL*.xlsx not found.", file=sys.stderr)
         return 6
-    changes = update_fat_plan.write_plan(order, xlsx)
+    changes = update_fat_plan.write_plan(order, xlsx, evidence_dir=src_dir)
     print(f"      {len(changes)} cells updated in {os.path.basename(xlsx)}.")
     for c in changes:
         print("        " + c)

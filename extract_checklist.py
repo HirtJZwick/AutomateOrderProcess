@@ -149,6 +149,9 @@ def parse_order_processing(tables):
         "received_oc_from_zrx": "Received OC from ZRX",
         "oc_sent_to_customer": "OC sent to Customer",
         "packing_details_from_zrx": "Packing Details from ZRX",
+        "collection_order_to_forwarder": "Collection Order to Forwarder",
+        "information_customer_cia": "Information Customer w. CIA",
+        "invoice_received_from_zrx": "Invoice received from ZRX",
         "iqoq": "IQ/OQ n",
     }
     for key, label in mapping.items():

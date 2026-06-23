@@ -1,109 +1,130 @@
-# Eric Automate Excel Sheet
+# ZwickRoell Order Tracker
 
-Automates the transfer of ZwickRoell order data from a Word checklist (`.docx`) into the **FAT_INSTALL Plan Worksheet** (`.xlsx`), with a SQLite staging layer in between.
+A locally-hosted platform that extracts order data from ZwickRoell order
+documents and visualizes each order's progress, so Eric can see status at a
+glance before talking to a customer.
 
 ## How It Works
 
 ```
-Checklist*.docx  →  extract  →  eric_orders.db (SQLite)  →  FAT_INSTALL*.xlsx
+order folders (.docx / .pdf)
+        │
+        ▼
+  parse + extract        (extract_checklist.py, extract_order_pdf.py)
+        │
+        ▼
+  SQLite  eric_orders.db (storage.py)
+        │
+        ▼
+  FastAPI JSON API       (webapp/backend)
+        │
+        ▼
+  React + Vite UI        (webapp/frontend)
 ```
 
-1. **Extract** – `extract_checklist.py` parses the ERP-generated Word checklist and pulls out order fields (customer, ship-to address, contacts, dates, service info, etc.).
-2. **Stage** – `storage.py` upserts the extracted data into a local SQLite database (`eric_orders.db`), keyed on `dossier_no`. Re-running on the same order updates the existing row.
-3. **Write** – `update_fat_plan.py` reads the staged order and writes specific cells in the `FAT Plan` sheet of the Excel workbook.
+1. **Extract** – `extract_checklist.py` parses the ERP checklist `.docx`;
+   `extract_order_pdf.py` parses an *Order* PDF for the ZwickRoell contacts
+   (Regional Sales Manager, Logistics Coordinator).
+2. **Ingest** – `ingest.py` merges both, records which documents are present,
+   and upserts into the SQLite database (keyed on `dossier_no`).
+3. **Serve** – a FastAPI backend exposes the data as JSON, including a derived
+   high-level **stage** and **completeness** score.
+4. **Visualize** – a React/Vite dashboard shows color-coded order cards with an
+   expandable detail view.
 
 ## Project Structure
 
-| File | Purpose |
+| Path | Purpose |
 |---|---|
-| `main.py` | Orchestrator – runs the full pipeline |
-| `extract_checklist.py` | Word `.docx` parser |
-| `storage.py` | SQLite read/write layer |
-| `update_fat_plan.py` | Excel `.xlsx` writer |
-| `run_python.ps1` | PowerShell wrapper invoked by Power Automate Desktop |
-| `eric_orders.db` | SQLite database (auto-created on first run) |
-| `FAT_INSTALL Plan Worksheet.xlsx` | Target Excel workbook |
-| `logs/` | Runtime logs written by `run_python.ps1` |
+| `extract_checklist.py` | Word `.docx` checklist parser |
+| `extract_order_pdf.py` | *Order* PDF parser (ZwickRoell contacts) |
+| `storage.py` | SQLite read/write layer (orders + documents) |
+| `ingest.py` | Core ingestion: `ingest_folder()` + `scan_root()` |
+| `config.json` | Settings: `root_folder`, `db_path` |
+| `webapp/backend/` | FastAPI app (`app.py`, `settings.py`, `derive.py`) |
+| `webapp/frontend/` | React + Vite dashboard |
+| `excel_legacy/` | **Retired** Excel write-back (`update_fat_plan.py`, `milestone_status.py`, `main.py`) — kept for reference, not part of the active flow |
+| `eric_orders.db` | SQLite database (auto-created) |
 
 ## Requirements
 
-- Python 3.10+
-- Virtual environment at `zwick_venv_ericproject\`
+- **Python 3.10+** with the venv at `zwick_venv_ericproject\`
+- **Node.js 18+** (for the frontend)
 
-Install dependencies into the venv:
-
-```powershell
-zwick_venv_ericproject\Scripts\pip install python-docx openpyxl
-```
-
-## Usage
-
-### Run the full pipeline
+Install Python dependencies:
 
 ```powershell
-# Uses the newest Checklist*.docx found in the project folder
-python main.py
-
-# Or specify a path explicitly
-python main.py "C:\path\to\Checklist DO737348 Order Report.docx"
+zwick_venv_ericproject\Scripts\pip install python-docx openpyxl pdfplumber fastapi "uvicorn[standard]"
 ```
 
-### Run individual steps
+## Configuration
+
+Edit `config.json` to point at the folder that contains all order folders:
+
+```json
+{
+  "root_folder": "C:\\path\\to\\OneDrive_2_6-18-2026",
+  "db_path": "eric_orders.db"
+}
+```
+
+## Running the Platform
+
+**1. Start the backend** (from the project root):
 
 ```powershell
-# Extract fields from a checklist and print JSON
-python extract_checklist.py "Checklist DO737348 Order Report.docx"
-
-# Write the most recent staged order to the workbook
-python update_fat_plan.py
-
-# Write a specific order by dossier number
-python update_fat_plan.py 737348
+zwick_venv_ericproject\Scripts\python -m uvicorn webapp.backend.app:app --reload --port 8000
 ```
 
-### Via Power Automate Desktop
-
-`run_python.ps1` wraps `main.py` for use in a Power Automate Desktop **Run application** action:
+**2. Start the frontend** (in `webapp/frontend`):
 
 ```powershell
-.\run_python.ps1 -ScriptPath .\main.py -ScriptArgs "C:\path\to\Checklist....docx"
+npm install      # first time only
+npm run dev
 ```
 
-The script activates the venv Python, enforces UTF-8 encoding (for international customer names), and logs all runs to `logs\run_python.log`.
+Then open **http://localhost:5173**. Click **"Scan orders"** to walk the
+configured `root_folder`, extract every order folder (any folder containing a
+`Checklist*.docx`), and load them into the database. The dev server proxies
+`/api` to the backend automatically.
 
-## Exit Codes
+## Dashboard
 
-| Code | Meaning |
-|---|---|
-| `0` | Success |
-| `2` | Venv Python not found (`run_python.ps1`) |
-| `3` | Script file not found (`run_python.ps1`) |
-| `4` | Checklist `.docx` not found |
-| `5` | No staged order in database |
-| `6` | `FAT_INSTALL*.xlsx` workbook not found |
-| `7` | Could not extract a Dossier No. from the checklist |
+- **Order cards** show customer, dossier/order id, machine, key dates and the
+  primary contact, color-coded by stage.
+- **Stage band** (derived directly from the checklist dates, no rule engine):
+  `New → Order Confirmed → Packed → Shipped`.
+  - Shipped: invoice / collection-tracking / customer-informed date present
+  - Packed: packing-details date present
+  - Order Confirmed: OC-received / OC-sent date present
+- **Completeness bar** shows how much expected information was extracted
+  (green = full, amber = partial, red = low, grey = missing).
+- Click a card (or open `/?order=<dossier>`) for the full detail drawer:
+  overview, contacts, order-processing timeline, service info and the list of
+  documents found in the folder.
 
-## Extracted Fields
+## API
 
-Fields parsed from the checklist and stored in `eric_orders.db`:
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/config` | Current root folder / db path |
+| `GET` | `/api/orders` | Order summaries (+ derived stage & completeness) |
+| `GET` | `/api/orders/{dossier}` | Full order detail incl. documents |
+| `POST` | `/api/scan` | Walk the root folder and ingest all orders |
 
-- `dossier_no`, `order_id`, `account_no`, `customer_name`
-- `ship_to_address`, `shipping_contact`, `technical_contact`
-- `order_date`, `machine_type`, `industry`
-- `po_received_on`, `customer_delivery_date_zru_oc`, `eta_for_sa`
-- `send_po_to_zrx`, `send_order_acknowledgement`, `received_oc_from_zrx`
-- `oc_sent_to_customer`, `packing_details_from_zrx`, `iqoq`
-- `installation_required_hours`, `special_cal_gear_required`
-- `technician`, `service_activity_done_by`, `sa`
+## Legacy: Excel write-back
 
-## Excel Cells Written
+The earlier workflow that wrote data and inferred milestone statuses back into
+the **FAT_INSTALL Plan Worksheet** lives in `excel_legacy/` and is no longer part
+of the active pipeline. It still runs standalone if needed:
 
-| Cell | Value |
-|---|---|
-| `B2` | Document number (`DO<dossier_no>`) |
-| `B3` | Customer name |
-| `B4` | Install location (ship-to address) |
-| `B19` | Customer contact name |
-| `C19` | Customer company |
-| `D19` | Contact phone |
-| `E19` | Contact email |
+```powershell
+zwick_venv_ericproject\Scripts\python excel_legacy\main.py "C:\path\to\Checklist ....docx"
+```
+
+## Notes
+
+- This is a **prototype** intended for demo and iteration.
+- The rule-based milestone inference (`excel_legacy/milestone_status.py`) is
+  intentionally **not** used by the website; the dashboard derives a simpler
+  stage directly from the data. It may be revisited later.

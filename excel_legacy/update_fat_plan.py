@@ -19,9 +19,16 @@ import sys
 
 import openpyxl
 
+# Core modules (storage) live in the parent directory.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import milestone_status
 import storage
 
 SHEET_NAME = "FAT Plan"
+
+# Statuses that mean "not yet touched" - the only rows the inference may fill.
+_OPEN_STATUSES = {None, "", "not started"}
 
 # Direct field -> cell mapping (header block of the FAT Plan sheet).
 SCALAR_MAPPING = {
@@ -59,8 +66,12 @@ def _parse_contact(raw: str) -> dict:
     return out
 
 
-def write_plan(order: dict, xlsx_path: str) -> list[str]:
-    """Apply the order to the workbook in place. Returns a list of changes."""
+def write_plan(order: dict, xlsx_path: str, evidence_dir: str | None = None) -> list[str]:
+    """Apply the order to the workbook in place. Returns a list of changes.
+
+    If `evidence_dir` is given, milestone statuses are inferred from the
+    documents/dates found there and written to rows still "Not Started".
+    """
     wb = openpyxl.load_workbook(xlsx_path)
     ws = wb[SHEET_NAME] if SHEET_NAME in wb.sheetnames else wb.active
     changes: list[str] = []
@@ -83,6 +94,37 @@ def write_plan(order: dict, xlsx_path: str) -> list[str]:
     setc("C19", order.get("customer_name"))
     setc("D19", contact["phone"])
     setc("E19", contact["email"])
+
+    # ZwickRoell contacts from the Order Confirmation PDF.
+    # Regional Sales Manager (row 13)
+    if order.get("rsm"):
+        setc("B13", order.get("rsm"))
+        setc("C13", "ZwickRoell, US")
+        setc("D13", order.get("rsm_phone"))
+        setc("E13", order.get("rsm_email"))
+    # Logistics Coordinator (row 20)
+    if order.get("logistics_coordinator"):
+        setc("B20", order.get("logistics_coordinator"))
+        setc("C20", "ZwickRoell, US")
+        setc("D20", order.get("logistics_coordinator_phone"))
+        setc("E20", order.get("logistics_coordinator_email"))
+
+    # MILESTONE TRACKING: infer statuses from documents/dates in the order folder.
+    # Only fill rows still "Not Started"; never overwrite Eric's manual edits.
+    if evidence_dir:
+        evidence = milestone_status.scan_evidence(evidence_dir, order)
+        for row, upd in milestone_status.infer_statuses(order, evidence).items():
+            current = (ws[f"F{row}"].value or "").strip().lower()
+            if current not in _OPEN_STATUSES:
+                continue
+            ws[f"F{row}"] = upd["status"]
+            changes.append(f"F{row} = {upd['status']!r} (status)")
+            if upd.get("date"):
+                ws[f"C{row}"] = upd["date"]
+                changes.append(f"C{row} = {upd['date']!r} (actual date)")
+            if upd.get("note"):
+                ws[f"H{row}"] = upd["note"]
+                changes.append(f"H{row} = {upd['note']!r} (note)")
 
     wb.save(xlsx_path)
     return changes

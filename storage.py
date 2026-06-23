@@ -35,6 +35,9 @@ COLUMNS = [
     "received_oc_from_zrx",
     "oc_sent_to_customer",
     "packing_details_from_zrx",
+    "collection_order_to_forwarder",
+    "information_customer_cia",
+    "invoice_received_from_zrx",
     "iqoq",
     "installation_required_hours",
     "special_cal_gear_required",
@@ -42,6 +45,18 @@ COLUMNS = [
     "service_activity_done_by",
     "sa",
     "source_file",
+    # --- From the Order Confirmation PDF (extract_order_pdf.py) ---
+    "oc_source_file",
+    "oc_purchase_order_no",
+    "oc_quotation_no",
+    "oc_dossier_no",
+    "logistics_coordinator",
+    "logistics_coordinator_phone",
+    "logistics_coordinator_email",
+    "rsm",
+    "rsm_phone",
+    "rsm_email",
+    "source_folder",
 ]
 
 
@@ -62,7 +77,30 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS order_documents (
+            "dossier_no" TEXT,
+            "file_name" TEXT,
+            "rel_path" TEXT,
+            "category" TEXT,
+            PRIMARY KEY ("dossier_no", "rel_path")
+        )
+        """
+    )
+    _migrate_columns(conn)
     conn.commit()
+
+
+def _migrate_columns(conn: sqlite3.Connection) -> None:
+    """Add any columns missing from a pre-existing `orders` table.
+
+    SQLite's CREATE TABLE IF NOT EXISTS leaves an older table untouched, so new
+    fields (e.g. the Order Confirmation contacts) must be added explicitly."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(orders)")}
+    for col in COLUMNS + ["updated_at"]:
+        if col not in existing:
+            conn.execute(f'ALTER TABLE orders ADD COLUMN "{col}" TEXT')
 
 
 def upsert_order(conn: sqlite3.Connection, data: dict) -> str:
@@ -95,6 +133,30 @@ def get_order(conn: sqlite3.Connection, dossier_no: str) -> dict | None:
     cur = conn.execute("SELECT * FROM orders WHERE dossier_no = ?", (dossier_no,))
     row = cur.fetchone()
     return dict(row) if row else None
+
+
+def list_orders(conn: sqlite3.Connection) -> list[dict]:
+    cur = conn.execute("SELECT * FROM orders ORDER BY updated_at DESC")
+    return [dict(r) for r in cur.fetchall()]
+
+
+def replace_documents(conn: sqlite3.Connection, dossier_no: str, docs: list[dict]) -> None:
+    """Replace the document list for an order. Each doc: {file_name, rel_path, category}."""
+    conn.execute("DELETE FROM order_documents WHERE dossier_no = ?", (dossier_no,))
+    conn.executemany(
+        """INSERT OR REPLACE INTO order_documents
+           (dossier_no, file_name, rel_path, category) VALUES (?, ?, ?, ?)""",
+        [(dossier_no, d.get("file_name"), d.get("rel_path"), d.get("category")) for d in docs],
+    )
+    conn.commit()
+
+
+def get_documents(conn: sqlite3.Connection, dossier_no: str) -> list[dict]:
+    cur = conn.execute(
+        "SELECT file_name, rel_path, category FROM order_documents WHERE dossier_no = ? ORDER BY category, file_name",
+        (dossier_no,),
+    )
+    return [dict(r) for r in cur.fetchall()]
 
 
 def store(data: dict, db_path: str = DEFAULT_DB) -> str:
