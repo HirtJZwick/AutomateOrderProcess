@@ -40,7 +40,7 @@ export default function OrderCard({ order, onOpen }) {
       <div className="card-meta">
         <Meta label="Machine" value={order.machine_type} />
         <Meta label="Industry" value={order.industry} />
-        <Meta label="Order date" value={order.order_date} />
+        <Meta label="Shipping date" value={order.shipping_date} />
         <Meta label="OC received" value={order.received_oc_from_zrx} />
         <Meta label="Customer contact" value={contactName(order.technical_contact) || order.shipping_contact} />
         <Meta label="Sales mgr (RSM)" value={order.rsm} />

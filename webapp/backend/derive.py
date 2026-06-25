@@ -13,7 +13,7 @@ from __future__ import annotations
 STAGES = ["New", "Order Confirmed", "Packed", "Shipped"]
 
 # Fields that signal each stage has been reached.
-_SHIPPED_FIELDS = ["invoice_received_from_zrx", "collection_order_to_forwarder", "information_customer_cia"]
+_SHIPPED_FIELDS = ["shipping_date"]
 _PACKED_FIELDS = ["packing_details_from_zrx"]
 _CONFIRMED_FIELDS = ["received_oc_from_zrx", "oc_sent_to_customer"]
 

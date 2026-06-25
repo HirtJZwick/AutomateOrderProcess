@@ -10,6 +10,7 @@ Power Automate flow can run repeatedly without creating stale copies.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 
@@ -57,6 +58,7 @@ COLUMNS = [
     "rsm_phone",
     "rsm_email",
     "source_folder",
+    "shipping_date",
 ]
 
 
@@ -135,9 +137,34 @@ def get_order(conn: sqlite3.Connection, dossier_no: str) -> dict | None:
     return dict(row) if row else None
 
 
+_DATE_FORMATS = [
+    "%m/%d/%Y %I:%M %p",   # 11/23/2021 2:20 PM
+    "%-m/%-d/%Y %-I:%M %p", # non-zero-padded (Linux); ignored on Windows
+    "%m/%d/%Y %H:%M",      # 11/23/2021 14:20
+    "%d.%m.%Y %H:%M",      # 22.01.2026 14:48
+    "%m/%d/%Y",            # 11/23/2021
+    "%d.%m.%Y",            # 22.01.2026
+]
+
+
+def _parse_order_date(value: str | None) -> datetime:
+    """Parse a mixed-format order_date string; returns datetime.min on failure."""
+    if not value:
+        return datetime.min
+    s = re.sub(r"\s+", " ", value.strip())
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return datetime.min
+
+
 def list_orders(conn: sqlite3.Connection) -> list[dict]:
-    cur = conn.execute("SELECT * FROM orders ORDER BY updated_at DESC")
-    return [dict(r) for r in cur.fetchall()]
+    cur = conn.execute("SELECT * FROM orders")
+    orders = [dict(r) for r in cur.fetchall()]
+    orders.sort(key=lambda o: _parse_order_date(o.get("order_date")), reverse=True)
+    return orders
 
 
 def replace_documents(conn: sqlite3.Connection, dossier_no: str, docs: list[dict]) -> None:

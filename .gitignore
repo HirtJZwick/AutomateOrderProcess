@@ -23,3 +23,6 @@ output.txt
 
 # Individual files
 run_python.ps1
+
+# Secrets
+llm_config.py

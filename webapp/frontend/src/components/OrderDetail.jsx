@@ -79,6 +79,7 @@ export default function OrderDetail({ dossier, onClose }) {
                 <Field label="Machine type" value={o.machine_type} />
                 <Field label="Industry" value={o.industry} />
                 <Field label="Order date" value={o.order_date} />
+                <Field label="Shipping date" value={o.shipping_date} />
                 <Field label="PO received on" value={o.po_received_on} />
                 <Field label="Purchase order no." value={o.oc_purchase_order_no} />
                 <Field label="Quotation no." value={o.oc_quotation_no} />

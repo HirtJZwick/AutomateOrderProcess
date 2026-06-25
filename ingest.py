@@ -20,6 +20,7 @@ import os
 
 import extract_checklist
 import extract_order_pdf
+import llm_extract
 import storage
 
 # Filename-substring -> document category, for the documents list / completeness.
@@ -74,9 +75,23 @@ def ingest_folder(folder: str, db_path: str = storage.DEFAULT_DB) -> dict | None
     if not data.get("dossier_no"):
         return None
 
-    order_pdf = extract_order_pdf.find_order_pdf(folder)
+    """ order_pdf = extract_order_pdf.find_order_pdf(folder)
     if order_pdf:
-        data.update(extract_order_pdf.extract(order_pdf))
+        data.update(extract_order_pdf.extract(order_pdf))     # header (PO, quotation)
+        try:
+            data.update(llm_extract.extract_order_contacts(order_pdf))  # contacts via LLM
+        except Exception as exc:
+            print(f"WARN: contact extraction failed for {order_pdf}: {exc}")
+
+    for shipping_pdf in extract_order_pdf.find_shipping_pdfs(folder):
+        try:
+            result = llm_extract.extract_shipping_date(shipping_pdf)
+        except Exception as exc:
+            print(f"WARN: shipping date extraction failed for {shipping_pdf}: {exc}")
+            continue
+        if result.get("shipping_date"):
+            data.update(result)
+            break """
 
     data["source_folder"] = folder
 

@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="660" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#444"/>
+    </marker>
+    <style>
+      .title{font-size:26px;font-weight:700;fill:#1a1a2e}
+      .lbl{font-size:14px;fill:#333}
+      .small{font-size:12px;fill:#666}
+      .tag{font-size:12px;font-weight:700;fill:#fff}
+      .box{rx:10;ry:10}
+    </style>
+  </defs>
+
+  <text x="40" y="44" class="title">ZwickRoell Order Tracker — How it runs</text>
+
+  <!-- BROWSER -->
+  <rect x="40" y="80" width="260" height="150" rx="12" fill="#eaf3ff" stroke="#3b82f6" stroke-width="2"/>
+  <rect x="40" y="80" width="260" height="30" rx="12" fill="#3b82f6"/>
+  <text x="55" y="100" class="tag">YOUR BROWSER</text>
+  <text x="60" y="140" class="lbl" font-weight="700">localhost:5173</text>
+  <text x="60" y="165" class="small">Loads the React dashboard</text>
+  <text x="60" y="184" class="small">Renders order cards &amp; drawer</text>
+  <text x="60" y="203" class="small">Calls /api/... for data</text>
+
+  <!-- FRONTEND SERVER -->
+  <rect x="360" y="80" width="270" height="200" rx="12" fill="#fff4e6" stroke="#f59e0b" stroke-width="2"/>
+  <rect x="360" y="80" width="270" height="30" rx="12" fill="#f59e0b"/>
+  <text x="375" y="100" class="tag">FRONTEND  —  Vite dev server</text>
+  <text x="380" y="140" class="lbl" font-weight="700">Node.js · port 5173</text>
+  <text x="380" y="165" class="small">Serves React + JSX (webapp/frontend)</text>
+  <text x="380" y="184" class="small">Hot-reloads UI on file save</text>
+  <text x="380" y="210" class="small" font-style="italic">Proxy rule:</text>
+  <text x="380" y="229" class="small">/api/*  →  127.0.0.1:8000</text>
+  <text x="380" y="255" class="small" fill="#b45309">(so the browser only ever</text>
+  <text x="380" y="272" class="small" fill="#b45309"> talks to one origin: 5173)</text>
+
+  <!-- BACKEND SERVER -->
+  <rect x="690" y="80" width="250" height="200" rx="12" fill="#e8f8ee" stroke="#10b981" stroke-width="2"/>
+  <rect x="690" y="80" width="250" height="30" rx="12" fill="#10b981"/>
+  <text x="705" y="100" class="tag">BACKEND  —  FastAPI</text>
+  <text x="710" y="140" class="lbl" font-weight="700">Python/uvicorn · port 8000</text>
+  <text x="710" y="165" class="small">GET  /api/config</text>
+  <text x="710" y="184" class="small">GET  /api/orders</text>
+  <text x="710" y="203" class="small">GET  /api/orders/{dossier}</text>
+  <text x="710" y="222" class="small">POST /api/scan</text>
+  <text x="710" y="252" class="small">Derives stage + completeness</text>
+
+  <!-- arrows row 1 -->
+  <line x1="300" y1="150" x2="358" y2="150" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="300" y="138" class="small">HTTP</text>
+  <line x1="630" y1="175" x2="688" y2="175" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="628" y="163" class="small">proxied /api</text>
+
+  <!-- DATA LAYER -->
+  <rect x="690" y="340" width="250" height="120" rx="12" fill="#f3e8ff" stroke="#8b5cf6" stroke-width="2"/>
+  <rect x="690" y="340" width="250" height="30" rx="12" fill="#8b5cf6"/>
+  <text x="705" y="360" class="tag">DATA</text>
+  <text x="710" y="398" class="lbl" font-weight="700">eric_orders.db (SQLite)</text>
+  <text x="710" y="423" class="small">storage.py read/write layer</text>
+  <text x="710" y="442" class="small">orders + documents tables</text>
+
+  <line x1="815" y1="280" x2="815" y2="338" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="822" y="315" class="small">SQL</text>
+
+  <!-- INGEST -->
+  <rect x="360" y="340" width="270" height="120" rx="12" fill="#fdeaea" stroke="#ef4444" stroke-width="2"/>
+  <rect x="360" y="340" width="270" height="30" rx="12" fill="#ef4444"/>
+  <text x="375" y="360" class="tag">INGEST  (POST /api/scan)</text>
+  <text x="380" y="398" class="small">ingest.py walks root_folder</text>
+  <text x="380" y="417" class="small">extract_checklist.py  (.docx)</text>
+  <text x="380" y="436" class="small">extract_order_pdf.py  (Order .pdf)</text>
+
+  <line x1="688" y1="400" x2="632" y2="400" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="636" y="388" class="small">upsert</text>
+
+  <!-- SOURCE DOCS -->
+  <rect x="40" y="340" width="260" height="120" rx="12" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
+  <rect x="40" y="340" width="260" height="30" rx="12" fill="#64748b"/>
+  <text x="55" y="360" class="tag">SOURCE FILES</text>
+  <text x="60" y="398" class="small">Order folders on disk</text>
+  <text x="60" y="417" class="small">Checklist*.docx + Order*.pdf</text>
+  <text x="60" y="436" class="small">(path set in config.json)</text>
+
+  <line x1="358" y1="400" x2="302" y2="400" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="306" y="388" class="small">read</text>
+
+  <!-- WHY TWO SERVERS -->
+  <rect x="40" y="500" width="900" height="130" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="58" y="528" class="lbl" font-weight="700" fill="#1a1a2e">Why two localhost ports?</text>
+  <text x="58" y="554" class="small">• Port 5173 = the <tspan font-weight="700">Vite frontend</tspan> dev server: builds/serves the React UI and live-reloads as you edit components.</text>
+  <text x="58" y="576" class="small">• Port 8000 = the <tspan font-weight="700">FastAPI backend</tspan>: a separate Python program holding the data, parsing logic and SQLite DB.</text>
+  <text x="58" y="598" class="small">• They are independent processes (JavaScript vs Python). Vite proxies <tspan font-weight="700">/api</tspan> to 8000, so the browser uses just one URL — 5173.</text>
+  <text x="58" y="620" class="small">• In production you'd build the UI (<tspan font-weight="700">npm run build</tspan>) and let FastAPI serve the static files, collapsing back to one port.</text>
+</svg>

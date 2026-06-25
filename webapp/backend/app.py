@@ -54,6 +54,7 @@ _SUMMARY_FIELDS = [
     "machine_type",
     "industry",
     "order_date",
+    "shipping_date",
     "po_received_on",
     "received_oc_from_zrx",
     "packing_details_from_zrx",
