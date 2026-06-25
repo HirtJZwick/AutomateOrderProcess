@@ -94,6 +94,8 @@ def ingest_folder(folder: str, db_path: str = storage.DEFAULT_DB) -> dict | None
             break """
 
     data["source_folder"] = folder
+    if "cancelled" in os.path.basename(folder).lower():
+        data["cancelled"] = "1"
 
     conn = storage.connect(db_path)
     try:

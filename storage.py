@@ -59,6 +59,7 @@ COLUMNS = [
     "rsm_email",
     "source_folder",
     "shipping_date",
+    "cancelled",
 ]
 
 
