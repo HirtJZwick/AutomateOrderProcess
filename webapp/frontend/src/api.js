@@ -20,4 +20,5 @@ export const api = {
   listOrders: () => http("/api/orders"),
   getOrder: (dossier) => http(`/api/orders/${encodeURIComponent(dossier)}`),
   scan: () => http("/api/scan", { method: "POST" }),
+  scanNew: () => http("/api/scan/new", { method: "POST" }),
 };

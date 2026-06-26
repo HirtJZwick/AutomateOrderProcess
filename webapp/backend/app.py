@@ -63,6 +63,7 @@ _SUMMARY_FIELDS = [
     "technical_contact",
     "shipping_contact",
     "updated_at",
+    "cancelled",
 ]
 
 
@@ -135,3 +136,12 @@ def scan() -> dict:
     if not root or not os.path.isdir(root):
         raise HTTPException(status_code=400, detail=f"Configured root_folder is invalid: {root!r}")
     return ingest.scan_root(root, db_path=cfg["db_path"])
+
+
+@app.post("/api/scan/new")
+def scan_new() -> dict:
+    cfg = load_config()
+    root = cfg["root_folder"]
+    if not root or not os.path.isdir(root):
+        raise HTTPException(status_code=400, detail=f"Configured root_folder is invalid: {root!r}")
+    return ingest.scan_new(root, db_path=cfg["db_path"])

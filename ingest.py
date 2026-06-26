@@ -116,6 +116,43 @@ def find_order_folders(root: str) -> list[str]:
     return sorted(folders)
 
 
+def scan_new(root: str, db_path: str = storage.DEFAULT_DB) -> dict:
+    """Ingest only order folders not yet present in the database.
+
+    Compares on-disk folders (by path) against the `source_folder` values
+    already stored.  Folders already in the DB are skipped entirely.
+    """
+    conn = storage.connect(db_path)
+    try:
+        storage.init_db(conn)
+        known = storage.list_source_folders(conn)
+    finally:
+        conn.close()
+
+    all_folders = find_order_folders(root)
+    new_folders = [f for f in all_folders if f not in known]
+
+    ingested, skipped = [], []
+    for folder in new_folders:
+        try:
+            order = ingest_folder(folder, db_path=db_path)
+            if order:
+                ingested.append(order.get("dossier_no"))
+            else:
+                skipped.append(folder)
+        except Exception as exc:
+            skipped.append(f"{folder} :: {exc}")
+
+    return {
+        "root": root,
+        "folders_found": len(all_folders),
+        "new_folders_found": len(new_folders),
+        "ingested": ingested,
+        "ingested_count": len(ingested),
+        "skipped": skipped,
+    }
+
+
 def scan_root(root: str, db_path: str = storage.DEFAULT_DB) -> dict:
     """Ingest every order folder under `root`. Returns a summary dict."""
     folders = find_order_folders(root)

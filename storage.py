@@ -187,6 +187,12 @@ def get_documents(conn: sqlite3.Connection, dossier_no: str) -> list[dict]:
     return [dict(r) for r in cur.fetchall()]
 
 
+def list_source_folders(conn: sqlite3.Connection) -> set[str]:
+    """Return the set of all known source_folder values stored in the DB."""
+    cur = conn.execute("SELECT source_folder FROM orders WHERE source_folder IS NOT NULL")
+    return {row[0] for row in cur.fetchall()}
+
+
 def store(data: dict, db_path: str = DEFAULT_DB) -> str:
     conn = connect(db_path)
     try:

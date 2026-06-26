@@ -32,9 +32,14 @@ export default function OrderCard({ order, onOpen }) {
             Dossier {order.dossier_no} &middot; {order.order_id || "—"}
           </div>
         </div>
-        <span className="stage-pill" style={{ background: stageColor(stageName) }}>
-          {stageName}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span className="stage-pill" style={{ background: stageColor(stageName) }}>
+            {stageName}
+          </span>
+          {order.cancelled === "1" && (
+            <span className="cancelled-pill">Cancelled</span>
+          )}
+        </div>
       </div>
 
       <div className="card-meta">

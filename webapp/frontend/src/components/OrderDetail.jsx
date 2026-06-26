@@ -66,10 +66,13 @@ export default function OrderDetail({ dossier, onClose }) {
 
         {data && (
           <>
-            <div style={{ marginTop: 14 }}>
+            <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8 }}>
               <span className="stage-pill" style={{ background: stageColor(stageName) }}>
                 {stageName}
               </span>
+              {o.cancelled === "1" && (
+                <span className="cancelled-pill">Cancelled</span>
+              )}
             </div>
             <StageBand stage={data.stage} />
             <CompletenessBar completeness={data.completeness} />

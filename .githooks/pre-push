@@ -1,0 +1,19 @@
+#!/bin/sh
+# Pre-push hook: runs the full test suite before allowing a push.
+# Blocked pushes print the failing tests so you know what to fix.
+#
+# One-time setup (run once per clone):
+#   git config core.hooksPath .githooks
+
+echo "Running test suite..."
+"zwick_venv_ericproject/Scripts/python.exe" -m pytest tests/ -q
+RESULT=$?
+
+if [ $RESULT -ne 0 ]; then
+    echo ""
+    echo "Tests failed — push blocked. Fix the failures above first."
+    exit 1
+fi
+
+echo "All tests passed."
+exit 0

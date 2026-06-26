@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import OrderCard from "./components/OrderCard";
 import OrderDetail from "./components/OrderDetail";
+import { STAGE_COLORS, stageColor } from "./colors";
+
+const STAGES = ["New", "Order Confirmed", "Packed", "Shipped"];
+const CANCELLED_COLOR = "#d32f2f";
 
 export default function App() {
   const [orders, setOrders] = useState([]);
@@ -12,6 +16,8 @@ export default function App() {
     return new URLSearchParams(window.location.search).get("order");
   });
   const [scanning, setScanning] = useState(false);
+  const [scanningNew, setScanningNew] = useState(false);
+  const [activeFilter, setActiveFilter] = useState(null); // null = All
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
@@ -60,6 +66,25 @@ export default function App() {
     }
   }
 
+  async function handleScanNew() {
+    setScanningNew(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const res = await api.scanNew();
+      setMessage(
+        res.ingested_count > 0
+          ? `New order scan complete — ${res.ingested_count} new order(s) added.`
+          : `No new orders found (${res.folders_found} folder(s) checked).`
+      );
+      if (res.ingested_count > 0) await loadOrders();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setScanningNew(false);
+    }
+  }
+
   async function handleScan() {
     setScanning(true);
     setMessage(null);
@@ -77,6 +102,12 @@ export default function App() {
     }
   }
 
+  const filteredOrders = activeFilter === "Cancelled"
+    ? orders.filter((o) => o.cancelled === "1")
+    : activeFilter
+    ? orders.filter((o) => o.stage?.name === activeFilter)
+    : orders;
+
   return (
     <>
       <header className="app-header">
@@ -86,9 +117,15 @@ export default function App() {
           </h1>
           <div className="sub">Order overview before customer conversations</div>
         </div>
+        <button className="btn secondary" onClick={handleScanNew} disabled={scanningNew || !rootExists}>
+          {scanningNew ? "Scanning…" : "New order"}
+        </button>
         <button className="btn" onClick={handleScan} disabled={scanning || !rootExists}>
           {scanning ? "Scanning…" : "Scan orders"}
         </button>
+        <label className="order_count" title="Number of orders currently loaded in the app">
+          {orders.length} order{orders.length === 1 ? "" : "s"}   
+        </label>
       </header>
 
       <div className="settings-bar">
@@ -119,6 +156,37 @@ export default function App() {
       {message && <div className="toast">{message}</div>}
       {error && <div className="toast error">{error}</div>}
 
+      <div className="filter-bar">
+        <button
+          className={`filter-btn${activeFilter === null ? " active" : ""}`}
+          onClick={() => setActiveFilter(null)}
+        >
+          All <span className="filter-count">{orders.length}</span>
+        </button>
+        {STAGES.map((stage) => {
+          const count = orders.filter((o) => o.stage?.name === stage).length;
+          return (
+            <button
+              key={stage}
+              className={`filter-btn${activeFilter === stage ? " active" : ""}`}
+              style={activeFilter === stage ? { background: stageColor(stage), borderColor: stageColor(stage), color: "#fff" } : { "--hover-color": stageColor(stage) }}
+              onClick={() => setActiveFilter(activeFilter === stage ? null : stage)}
+            >
+              {stage} <span className="filter-count">{count}</span>
+            </button>
+          );
+        })}
+        {orders.some((o) => o.cancelled === "1") && (
+          <button
+            className={`filter-btn${activeFilter === "Cancelled" ? " active" : ""}`}
+            style={activeFilter === "Cancelled" ? { background: CANCELLED_COLOR, borderColor: CANCELLED_COLOR, color: "#fff" } : { "--hover-color": CANCELLED_COLOR }}
+            onClick={() => setActiveFilter(activeFilter === "Cancelled" ? null : "Cancelled")}
+          >
+            Cancelled <span className="filter-count">{orders.filter((o) => o.cancelled === "1").length}</span>
+          </button>
+        )}
+      </div>
+
       <div className="container">
         {orders.length === 0 ? (
           <div className="empty">
@@ -127,7 +195,7 @@ export default function App() {
           </div>
         ) : (
           <div className="grid">
-            {orders.map((o) => (
+            {filteredOrders.map((o) => (
               <OrderCard key={o.dossier_no} order={o} onOpen={setSelected} />
             ))}
           </div>

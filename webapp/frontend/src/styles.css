@@ -110,6 +110,42 @@ body {
 }
 .toast.error { border-color: var(--c-low); background: #fdecec; color: #a3151b; }
 
+/* Stage filter bar */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.filter-btn:hover {
+  background: var(--hover-color, var(--accent));
+  border-color: var(--hover-color, var(--accent));
+  color: #fff;
+}
+.filter-btn.active { font-weight: 700; }
+
+.filter-count {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
 /* Grid of order cards */
 .grid {
   display: grid;
@@ -138,6 +174,16 @@ body {
   font-weight: 700;
   padding: 5px 11px;
   border-radius: 999px;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.cancelled-pill {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #d32f2f;
   color: #fff;
   white-space: nowrap;
 }

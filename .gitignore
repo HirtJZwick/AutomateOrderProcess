@@ -26,3 +26,7 @@ run_python.ps1
 
 # Secrets
 llm_config.py
+
+# retrieve_shipping_date.py artifacts
+retrieve_shipping_date_state.json
+shipping_date_results/
