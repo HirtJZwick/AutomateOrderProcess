@@ -117,15 +117,6 @@ export default function App() {
           </h1>
           <div className="sub">Order overview before customer conversations</div>
         </div>
-        <button className="btn secondary" onClick={handleScanNew} disabled={scanningNew || !rootExists}>
-          {scanningNew ? "Scanning…" : "New order"}
-        </button>
-        <button className="btn" onClick={handleScan} disabled={scanning || !rootExists}>
-          {scanning ? "Scanning…" : "Scan orders"}
-        </button>
-        <label className="order_count" title="Number of orders currently loaded in the app">
-          {orders.length} order{orders.length === 1 ? "" : "s"}   
-        </label>
       </header>
 
       <div className="settings-bar">
@@ -185,6 +176,14 @@ export default function App() {
             Cancelled <span className="filter-count">{orders.filter((o) => o.cancelled === "1").length}</span>
           </button>
         )}
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <button className="btn secondary" onClick={handleScanNew} disabled={scanningNew || !rootExists}>
+            {scanningNew ? "Scanning…" : "Scan new orders"}
+          </button>
+          {/* <button className="btn" onClick={handleScan} disabled={scanning || !rootExists}>
+            {scanning ? "Scanning…" : "Add"}
+          </button> */}
+        </div>
       </div>
 
       <div className="container">

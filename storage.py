@@ -164,7 +164,10 @@ def _parse_order_date(value: str | None) -> datetime:
 def list_orders(conn: sqlite3.Connection) -> list[dict]:
     cur = conn.execute("SELECT * FROM orders")
     orders = [dict(r) for r in cur.fetchall()]
-    orders.sort(key=lambda o: _parse_order_date(o.get("order_date")), reverse=True)
+    orders.sort(
+        key=lambda o: _parse_order_date(o.get("shipping_date") or o.get("order_date")),
+        reverse=True,
+    )
     return orders
 
 
