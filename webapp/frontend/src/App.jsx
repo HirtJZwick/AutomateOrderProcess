@@ -72,11 +72,15 @@ export default function App() {
     setError(null);
     try {
       const res = await api.scanNew();
-      setMessage(
-        res.ingested_count > 0
-          ? `New order scan complete — ${res.ingested_count} new order(s) added.`
-          : `No new orders found (${res.folders_found} folder(s) checked).`
-      );
+      if (res.aborted) {
+        setError(`Scan stopped: ${res.aborted} (${res.ingested_count} order(s) ingested before stopping).`);
+      } else {
+        setMessage(
+          res.ingested_count > 0
+            ? `New order scan complete — ${res.ingested_count} new order(s) added.`
+            : `No new orders found (${res.folders_found} folder(s) checked).`
+        );
+      }
       if (res.ingested_count > 0) await loadOrders();
     } catch (e) {
       setError(e.message);
@@ -91,9 +95,13 @@ export default function App() {
     setError(null);
     try {
       const res = await api.scan();
-      setMessage(
-        `Scan complete — ${res.ingested_count} order(s) loaded from ${res.folders_found} folder(s) found.`
-      );
+      if (res.aborted) {
+        setError(`Scan stopped: ${res.aborted} (${res.ingested_count} order(s) ingested before stopping).`);
+      } else {
+        setMessage(
+          `Scan complete — ${res.ingested_count} order(s) loaded from ${res.folders_found} folder(s) found.`
+        );
+      }
       await loadOrders();
     } catch (e) {
       setError(e.message);
