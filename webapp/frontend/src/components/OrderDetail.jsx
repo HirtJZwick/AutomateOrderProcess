@@ -143,6 +143,17 @@ export default function OrderDetail({ dossier, onClose }) {
                 ))}
               </div>
             </Section>
+
+            
+            <Section title="Notes">
+              <div className="notes">
+                <textarea
+                  placeholder="Write your notes here..."
+                  className="note-box"
+                />
+              </div>
+            </Section>
+
           </>
         )}
       </div>
