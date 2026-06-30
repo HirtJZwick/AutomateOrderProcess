@@ -81,7 +81,7 @@ def ingest_folder(folder: str, db_path: str = storage.DEFAULT_DB) -> dict | None
         try:
             data.update(llm_extract.extract_order_contacts(order_pdf))  # contacts via LLM
         except Exception as exc:
-            raise RuntimeError(f"Contact extraction failed for {order_pdf}: {exc}") from exc
+            print(f"WARN: contact extraction failed for {order_pdf}: {exc}")
 
     for shipping_pdf in extract_order_pdf.find_shipping_pdfs(folder):
         try:

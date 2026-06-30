@@ -16,6 +16,7 @@ webapp/frontend/dist/
 output.txt
 *.bak
 ~$*
+OrderTracker.zip
 
 # Editor
 .vscode/
