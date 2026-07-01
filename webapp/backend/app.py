@@ -19,10 +19,13 @@ import sys
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # Make the project-root core modules importable (ingest, storage, ...).
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DIST_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
 sys.path.insert(0, PROJECT_ROOT)
 
 import ingest  # noqa: E402
@@ -35,7 +38,7 @@ app = FastAPI(title="ZwickRoell Order Tracker", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -145,3 +148,10 @@ def scan_new() -> dict:
     if not root or not os.path.isdir(root):
         raise HTTPException(status_code=400, detail=f"Configured root_folder is invalid: {root!r}")
     return ingest.scan_new(root, db_path=cfg["db_path"])
+
+
+# Serve the pre-built React app for all non-API routes.
+# html=True enables SPA fallback: unknown paths return index.html.
+if os.path.isdir(DIST_DIR):
+    app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="spa")
+

@@ -86,13 +86,16 @@ def find_shipping_pdfs(folder: str) -> list[str]:
     Only PDFs whose filename contains 'delivery' (case-insensitive) are returned.
     Returns an empty list if that subfolder does not exist.
     """
-    shipping_dir = os.path.join(folder, SHIPPING_SUBFOLDER)
-    if not os.path.isdir(shipping_dir):
+    print(folder)
+    #shipping_dir = os.path.join(folder, SHIPPING_SUBFOLDER)
+    #print("Looking for shipping PDFs in:", shipping_dir)
+    if not os.path.isdir(folder):
         return []
+    print("Shipping subfolder found:", folder)
     hits = [
         p
-        for p in glob.glob(os.path.join(shipping_dir, "**", "*.pdf"), recursive=True)
-        if "delivery" in os.path.basename(p).lower()
+        for p in glob.glob(os.path.join(folder, "**", "*.pdf"), recursive=True)
+        if "invoice" in os.path.basename(p).lower()
         and not os.path.basename(p).startswith("~$")
     ]
     return sorted(hits)

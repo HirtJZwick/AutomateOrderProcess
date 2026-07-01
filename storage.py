@@ -6,6 +6,14 @@ SQLite staging for extracted Checklist orders.
 A single durable table `orders` keyed on `dossier_no` (the natural order key).
 Re-running on the same order UPDATES the row instead of duplicating it, so the
 Power Automate flow can run repeatedly without creating stale copies.
+
+Public write functions
+----------------------
+upsert_order       -- full insert-or-overwrite (first-time ingestion)
+update_order_fields -- partial update from manual UI edits (never overwrites
+                       dossier_no / updated_at; allows clearing fields)
+fill_empty_fields   -- refresh-safe merge: only fills columns that are currently
+                       empty, so manually edited values are never clobbered
 """
 from __future__ import annotations
 
@@ -194,6 +202,85 @@ def list_source_folders(conn: sqlite3.Connection) -> set[str]:
     """Return the set of all known source_folder values stored in the DB."""
     cur = conn.execute("SELECT source_folder FROM orders WHERE source_folder IS NOT NULL")
     return {row[0] for row in cur.fetchall()}
+
+
+# ---------------------------------------------------------------------------
+# Partial-update helpers (isolation point for future DB backend swaps)
+# ---------------------------------------------------------------------------
+
+_IMMUTABLE = {"dossier_no", "updated_at"}
+_EDITABLE = set(COLUMNS) - _IMMUTABLE
+
+
+def _is_empty(value) -> bool:
+    """True when a DB value is absent or blank — used by fill_empty_fields."""
+    return value is None or (isinstance(value, str) and value.strip() == "")
+
+
+def _update_columns(conn: sqlite3.Connection, dossier_no: str, updates: dict) -> None:
+    """Run a partial UPDATE for `updates` plus a fresh `updated_at`. No-op when empty.
+
+    This is the only place partial-update SQL exists; both public helpers call it
+    so a future backend swap only needs to reimplement this one function.
+    """
+    if not updates:
+        return
+    params = dict(updates)
+    params["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    set_clause = ", ".join(f'"{k}"=:{k}' for k in params)
+    params["_key"] = dossier_no
+    conn.execute(
+        f'UPDATE orders SET {set_clause} WHERE "dossier_no"=:_key',
+        params,
+    )
+    conn.commit()
+
+
+def update_order_fields(
+    conn: sqlite3.Connection, dossier_no: str, fields: dict
+) -> dict | None:
+    """Persist manual edits from the UI drawer.
+
+    Rules:
+    - Only keys listed in COLUMNS (minus dossier_no and updated_at) are written.
+    - Empty/blank submitted values ARE written — clearing a field blanks it.
+    - Returns the updated order dict, or None if the order does not exist.
+    """
+    if get_order(conn, dossier_no) is None:
+        return None
+
+    updates = {k: v for k, v in fields.items() if k in _EDITABLE}
+    if not updates:
+        return get_order(conn, dossier_no)
+
+    _update_columns(conn, dossier_no, updates)
+    return get_order(conn, dossier_no)
+
+
+def fill_empty_fields(
+    conn: sqlite3.Connection, dossier_no: str, data: dict
+) -> dict | None:
+    """Merge extracted data into an existing order, filling only empty columns.
+
+    Used by the per-order refresh so that manually edited (or previously
+    extracted) values are never overwritten. Documents are handled separately
+    by replace_documents.
+
+    If the order row does not yet exist, falls back to a full upsert_order.
+    Returns the resulting order dict.
+    """
+    current = get_order(conn, dossier_no)
+    if current is None:
+        upsert_order(conn, data)
+        return get_order(conn, dossier_no)
+
+    updates = {
+        k: data[k]
+        for k in _EDITABLE
+        if k in data and not _is_empty(data.get(k)) and _is_empty(current.get(k))
+    }
+    _update_columns(conn, dossier_no, updates)
+    return get_order(conn, dossier_no)
 
 
 def store(data: dict, db_path: str = DEFAULT_DB) -> str:
