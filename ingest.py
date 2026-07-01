@@ -5,7 +5,17 @@ Core ingestion for the order-tracking platform.
 
 `ingest_folder(folder)` extracts a single order from its document folder
 (Checklist .docx enriched with the Order Confirmation PDF), records which
-documents are present, and upserts everything into the SQLite database.
+documents are present, and writes to the SQLite database.
+
+Write modes
+-----------
+merge="overwrite" (default) — full upsert, replaces all columns.
+merge="fill_empty"          — only fills columns that are currently empty/NULL;
+                              manually edited values are never clobbered.
+                              Documents are always refreshed in both modes.
+
+`refresh_order(dossier_no)` re-scans the stored source_folder in fill_empty
+mode — new documents appear, no existing field values are overwritten.
 
 `scan_root(root)` walks a configured root directory, finds every order folder
 (any folder containing a `Checklist*.docx`), and ingests them all.
@@ -64,9 +74,23 @@ def list_documents(folder: str) -> list[dict]:
     return docs
 
 
-def ingest_folder(folder: str, db_path: str = storage.DEFAULT_DB) -> dict | None:
-    """Extract one order from `folder` and upsert it. Returns the order dict,
-    or None if no checklist could be parsed into a dossier key."""
+def ingest_folder(
+    folder: str,
+    db_path: str = storage.DEFAULT_DB,
+    merge: str = "overwrite",
+) -> dict | None:
+    """Extract one order from `folder` and write it to the DB.
+
+    Args:
+        folder:  Path to the order folder.
+        db_path: Path to the SQLite database.
+        merge:   "overwrite" (default) — full upsert, replaces all columns.
+                 "fill_empty" — only fills columns that are currently empty/NULL
+                 in the DB; manually edited values are never clobbered.
+                 Documents are always refreshed regardless of merge mode.
+
+    Returns the extracted data dict, or None if no checklist was found/parsed.
+    """
     checklist = extract_checklist.find_checklist(folder)
     if not checklist:
         return None
@@ -100,11 +124,62 @@ def ingest_folder(folder: str, db_path: str = storage.DEFAULT_DB) -> dict | None
     conn = storage.connect(db_path)
     try:
         storage.init_db(conn)
-        key = storage.upsert_order(conn, data)
+        key = data["dossier_no"]
+        if merge == "fill_empty":
+            storage.fill_empty_fields(conn, key, data)
+        else:
+            storage.upsert_order(conn, data)
         storage.replace_documents(conn, key, list_documents(folder))
     finally:
         conn.close()
     return data
+
+
+def refresh_order(
+    dossier_no: str,
+    db_path: str = storage.DEFAULT_DB,
+) -> dict:
+    """Re-scan the order's source folder, filling only empty DB fields.
+
+    Manually edited (or previously extracted) field values are never overwritten.
+    Documents are always refreshed so newly added files (invoices, shipping docs)
+    become visible immediately.
+
+    Args:
+        dossier_no: The order primary key.
+        db_path:    Path to the SQLite database.
+
+    Returns:
+        {"order": <order dict>, "documents": [<doc dicts>]}
+
+    Raises:
+        ValueError: if the order is not found, or its source_folder is missing
+                    or no longer present on disk.
+    """
+    conn = storage.connect(db_path)
+    try:
+        storage.init_db(conn)
+        order = storage.get_order(conn, dossier_no)
+        if order is None:
+            raise ValueError(f"Order {dossier_no!r} not found in database.")
+        folder = (order.get("source_folder") or "").strip()
+        if not folder or not os.path.isdir(folder):
+            raise ValueError(
+                f"Order {dossier_no!r} has no valid source_folder on disk: {folder!r}"
+            )
+    finally:
+        conn.close()
+
+    ingest_folder(folder, db_path=db_path, merge="fill_empty")
+
+    conn = storage.connect(db_path)
+    try:
+        updated_order = storage.get_order(conn, dossier_no)
+        documents = storage.get_documents(conn, dossier_no)
+    finally:
+        conn.close()
+
+    return {"order": updated_order, "documents": documents}
 
 
 def find_order_folders(root: str) -> list[str]:

@@ -120,3 +120,158 @@ def test_ingest_folder_no_cancelled_flag_for_normal_order(tmp_path, monkeypatch)
     result = ingest.ingest_folder(str(folder), db_path=db_path)
 
     assert result.get("cancelled") != "1"
+
+
+# ── ingest_folder merge modes ─────────────────────────────────────────────────
+
+def _patch_extraction(monkeypatch, folder, extracted_data):
+    """Helper: patch both checklist finders to return `extracted_data`."""
+    monkeypatch.setattr("extract_checklist.find_checklist", lambda f: str(folder / "Checklist.docx"))
+    monkeypatch.setattr("extract_checklist.extract", lambda p: dict(extracted_data))
+    monkeypatch.setattr("extract_order_pdf.find_order_pdf", lambda f: None)
+    monkeypatch.setattr("extract_order_pdf.find_shipping_pdfs", lambda f: [])
+
+
+def test_ingest_folder_overwrite_mode_replaces_fields(tmp_path, monkeypatch):
+    folder = tmp_path / "DO003 Corp"
+    folder.mkdir()
+    db_path = str(tmp_path / "test.db")
+
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO003", "customer_name": "Original"})
+    ingest.ingest_folder(str(folder), db_path=db_path)
+
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO003", "customer_name": "Overwritten"})
+    ingest.ingest_folder(str(folder), db_path=db_path, merge="overwrite")
+
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    assert storage.get_order(conn, "DO003")["customer_name"] == "Overwritten"
+    conn.close()
+
+
+def test_ingest_folder_fill_empty_does_not_overwrite(tmp_path, monkeypatch):
+    folder = tmp_path / "DO004 Corp"
+    folder.mkdir()
+    db_path = str(tmp_path / "test.db")
+
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO004", "customer_name": "Original"})
+    ingest.ingest_folder(str(folder), db_path=db_path)
+
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO004", "customer_name": "Should Not Win"})
+    ingest.ingest_folder(str(folder), db_path=db_path, merge="fill_empty")
+
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    assert storage.get_order(conn, "DO004")["customer_name"] == "Original"
+    conn.close()
+
+
+def test_ingest_folder_fill_empty_fills_blank_fields(tmp_path, monkeypatch):
+    folder = tmp_path / "DO005 Corp"
+    folder.mkdir()
+    db_path = str(tmp_path / "test.db")
+
+    # First ingest: industry missing
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO005", "customer_name": "Corp"})
+    ingest.ingest_folder(str(folder), db_path=db_path)
+
+    # Refresh: industry now extracted
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO005", "industry": "Automotive"})
+    ingest.ingest_folder(str(folder), db_path=db_path, merge="fill_empty")
+
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    order = storage.get_order(conn, "DO005")
+    conn.close()
+    assert order["industry"] == "Automotive"
+    assert order["customer_name"] == "Corp"  # was populated, must not change
+
+
+def test_ingest_folder_fill_empty_always_updates_documents(tmp_path, monkeypatch):
+    folder = tmp_path / "DO006 Corp"
+    folder.mkdir()
+    db_path = str(tmp_path / "test.db")
+
+    (folder / "Checklist.docx").write_bytes(b"")
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO006", "customer_name": "Corp"})
+    ingest.ingest_folder(str(folder), db_path=db_path)
+
+    # Add a new document to the folder
+    (folder / "Invoice_001.pdf").write_bytes(b"")
+    ingest.ingest_folder(str(folder), db_path=db_path, merge="fill_empty")
+
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    docs = storage.get_documents(conn, "DO006")
+    conn.close()
+    assert any(d["file_name"] == "Invoice_001.pdf" for d in docs)
+
+
+# ── refresh_order ─────────────────────────────────────────────────────────────
+
+def test_refresh_order_fills_empty_fields(tmp_path, monkeypatch):
+    folder = tmp_path / "DO007 Corp"
+    folder.mkdir()
+    db_path = str(tmp_path / "test.db")
+
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO007", "customer_name": "Corp"})
+    ingest.ingest_folder(str(folder), db_path=db_path)
+
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO007", "industry": "Medical"})
+    result = ingest.refresh_order("DO007", db_path=db_path)
+
+    assert result["order"]["industry"] == "Medical"
+    assert result["order"]["customer_name"] == "Corp"
+    assert "documents" in result
+
+
+def test_refresh_order_never_overwrites_populated(tmp_path, monkeypatch):
+    folder = tmp_path / "DO008 Corp"
+    folder.mkdir()
+    db_path = str(tmp_path / "test.db")
+
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO008", "customer_name": "Original"})
+    ingest.ingest_folder(str(folder), db_path=db_path)
+
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO008", "customer_name": "Intruder"})
+    result = ingest.refresh_order("DO008", db_path=db_path)
+
+    assert result["order"]["customer_name"] == "Original"
+
+
+def test_refresh_order_adds_new_documents(tmp_path, monkeypatch):
+    folder = tmp_path / "DO009 Corp"
+    folder.mkdir()
+    db_path = str(tmp_path / "test.db")
+
+    (folder / "Checklist.docx").write_bytes(b"")
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO009", "customer_name": "Corp"})
+    ingest.ingest_folder(str(folder), db_path=db_path)
+
+    # Anita drops an invoice into the folder
+    (folder / "Invoice_final.pdf").write_bytes(b"")
+    result = ingest.refresh_order("DO009", db_path=db_path)
+
+    assert any(d["file_name"] == "Invoice_final.pdf" for d in result["documents"])
+
+
+def test_refresh_order_raises_for_missing_order(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    with pytest.raises(ValueError, match="not found"):
+        ingest.refresh_order("DOESNOTEXIST", db_path=db_path)
+
+
+def test_refresh_order_raises_for_missing_folder(tmp_path, monkeypatch):
+    folder = tmp_path / "DO010 Corp"
+    folder.mkdir()
+    db_path = str(tmp_path / "test.db")
+
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO010", "customer_name": "Corp"})
+    ingest.ingest_folder(str(folder), db_path=db_path)
+
+    # Remove the folder from disk
+    import shutil
+    shutil.rmtree(str(folder))
+
+    with pytest.raises(ValueError, match="source_folder"):
+        ingest.refresh_order("DO010", db_path=db_path)
