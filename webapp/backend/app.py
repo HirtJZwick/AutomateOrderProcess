@@ -4,10 +4,14 @@ app.py
 FastAPI backend for the order-tracking platform.
 
 Endpoints:
-  GET  /api/config            -> current settings (root folder, db path)
-  GET  /api/orders            -> order summaries (+ derived stage & completeness)
-  GET  /api/orders/{dossier}  -> full order detail incl. documents
-  POST /api/scan              -> walk the root folder and ingest all orders
+  GET   /api/config                   -> current settings (root folder, db path)
+  POST  /api/config                   -> update scan root folder
+  GET   /api/orders                   -> order summaries (+ derived stage & completeness)
+  GET   /api/orders/{dossier}         -> full order detail incl. documents
+  PATCH /api/orders/{dossier}         -> save manual field edits (never touches dossier_no)
+  POST  /api/orders/{dossier}/refresh -> re-scan source folder (fill-empty merge)
+  POST  /api/scan                     -> walk the root folder and ingest all orders
+  POST  /api/scan/new                 -> ingest only folders not yet in the DB
 
 Run (from project root):
   zwick_venv_ericproject\\Scripts\\python -m uvicorn webapp.backend.app:app --reload --port 8000
@@ -127,6 +131,57 @@ def get_order(dossier: str) -> dict:
     return {
         "order": order,
         "documents": docs,
+        "stage": derive.derive_stage(order),
+        "completeness": derive.derive_completeness(order),
+    }
+
+
+class OrderFieldsUpdate(BaseModel):
+    fields: dict
+
+
+@app.patch("/api/orders/{dossier}")
+def patch_order(dossier: str, body: OrderFieldsUpdate) -> dict:
+    """Save manual field edits from the UI drawer.
+
+    Only whitelisted columns are written; dossier_no and updated_at are
+    immutable.  Submitting an empty string for a field clears it.
+    Returns the updated order with fresh stage and completeness.
+    """
+    conn = storage.connect(_db_path())
+    try:
+        storage.init_db(conn)
+        updated = storage.update_order_fields(conn, dossier, body.fields)
+        if updated is None:
+            raise HTTPException(status_code=404, detail=f"Order {dossier} not found")
+        docs = storage.get_documents(conn, dossier)
+    finally:
+        conn.close()
+    return {
+        "order": updated,
+        "documents": docs,
+        "stage": derive.derive_stage(updated),
+        "completeness": derive.derive_completeness(updated),
+    }
+
+
+@app.post("/api/orders/{dossier}/refresh")
+def refresh_order(dossier: str) -> dict:
+    """Re-scan the order's source folder in fill-empty mode.
+
+    Fills only empty fields; never overwrites manually edited values.
+    Documents are always refreshed so newly added files become visible.
+    Returns the updated order with fresh stage, completeness, and documents.
+    """
+    cfg = load_config()
+    try:
+        result = ingest.refresh_order(dossier, db_path=cfg["db_path"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    order = result["order"]
+    return {
+        "order": order,
+        "documents": result["documents"],
         "stage": derive.derive_stage(order),
         "completeness": derive.derive_completeness(order),
     }
