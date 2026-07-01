@@ -19,6 +19,14 @@ export const api = {
     }),
   listOrders: () => http("/api/orders"),
   getOrder: (dossier) => http(`/api/orders/${encodeURIComponent(dossier)}`),
+  updateOrder: (dossier, fields) =>
+    http(`/api/orders/${encodeURIComponent(dossier)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields }),
+    }),
+  refreshOrder: (dossier) =>
+    http(`/api/orders/${encodeURIComponent(dossier)}/refresh`, { method: "POST" }),
   scan: () => http("/api/scan", { method: "POST" }),
   scanNew: () => http("/api/scan/new", { method: "POST" }),
 };
