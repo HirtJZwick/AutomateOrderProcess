@@ -21,8 +21,8 @@ export default function OrderCard({ order, onOpen }) {
   const stageName = order.stage?.name || "New";
   return (
     <div
-      className="card"
-      style={{ borderLeftColor: stageColor(stageName) }}
+      className={`card${order.is_active ? " active" : ""}`}
+      style={{ borderLeftColor: order.is_active ? "var(--active)" : stageColor(stageName) }}
       onClick={() => onOpen(order.dossier_no)}
     >
       <div className="card-top">
