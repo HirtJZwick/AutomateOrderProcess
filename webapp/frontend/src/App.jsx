@@ -209,7 +209,7 @@ export default function App() {
         )}
       </div>
 
-      {selected && <OrderDetail dossier={selected} onClose={() => setSelected(null)} />}
+      {selected && <OrderDetail dossier={selected} onClose={() => setSelected(null)} onOrderUpdated={loadOrders} />}
     </>
   );
 }
