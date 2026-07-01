@@ -36,6 +36,9 @@ export default function OrderCard({ order, onOpen }) {
           <span className="stage-pill" style={{ background: stageColor(stageName) }}>
             {stageName}
           </span>
+          {order.is_active && (
+            <span className="active-pill">Active</span>
+          )}
           {order.cancelled === "1" && (
             <span className="cancelled-pill">Cancelled</span>
           )}

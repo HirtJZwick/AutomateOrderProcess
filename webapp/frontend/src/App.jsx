@@ -2,10 +2,22 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import OrderCard from "./components/OrderCard";
 import OrderDetail from "./components/OrderDetail";
-import { STAGE_COLORS, stageColor } from "./colors";
+import { STAGE_COLORS, stageColor, ACTIVE_COLOR } from "./colors";
 
 const STAGES = ["New", "Order Confirmed", "Packed", "Shipped"];
 const CANCELLED_COLOR = "#d32f2f";
+
+// Parse OC date strings into a Date for sorting. Handles both US (M/D/YYYY)
+// and European (DD.MM.YYYY) formats, with or without a time component.
+function parseOCDate(str) {
+  if (!str) return new Date(0);
+  const euro = str.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (euro) {
+    return new Date(`${euro[3]}-${euro[2].padStart(2, "0")}-${euro[1].padStart(2, "0")}`);
+  }
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? new Date(0) : d;
+}
 
 export default function App() {
   const [orders, setOrders] = useState([]);
@@ -110,11 +122,18 @@ export default function App() {
     }
   }
 
-  const filteredOrders = activeFilter === "Cancelled"
-    ? orders.filter((o) => o.cancelled === "1")
-    : activeFilter
-    ? orders.filter((o) => o.stage?.name === activeFilter)
-    : orders;
+  const activeOrders = orders.filter((o) => o.is_active);
+
+  const filteredOrders = (() => {
+    if (activeFilter === "Cancelled") return orders.filter((o) => o.cancelled === "1");
+    if (activeFilter === "Active") {
+      return [...activeOrders].sort(
+        (a, b) => parseOCDate(b.received_oc_from_zrx) - parseOCDate(a.received_oc_from_zrx)
+      );
+    }
+    if (activeFilter) return orders.filter((o) => o.stage?.name === activeFilter);
+    return orders;
+  })();
 
   return (
     <>
@@ -175,6 +194,15 @@ export default function App() {
             </button>
           );
         })}
+        {orders.some((o) => o.is_active) && (
+          <button
+            className={`filter-btn${activeFilter === "Active" ? " active" : ""}`}
+            style={activeFilter === "Active" ? { background: ACTIVE_COLOR, borderColor: ACTIVE_COLOR, color: "#fff" } : { "--hover-color": ACTIVE_COLOR }}
+            onClick={() => setActiveFilter(activeFilter === "Active" ? null : "Active")}
+          >
+            Active <span className="filter-count">{activeOrders.length}</span>
+          </button>
+        )}
         {orders.some((o) => o.cancelled === "1") && (
           <button
             className={`filter-btn${activeFilter === "Cancelled" ? " active" : ""}`}

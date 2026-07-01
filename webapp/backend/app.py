@@ -78,6 +78,7 @@ def _summarize(order: dict) -> dict:
     summary = {f: order.get(f) for f in _SUMMARY_FIELDS}
     summary["stage"] = derive.derive_stage(order)
     summary["completeness"] = derive.derive_completeness(order)
+    summary["is_active"] = derive.derive_active(order)
     return summary
 
 

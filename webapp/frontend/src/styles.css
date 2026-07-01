@@ -13,6 +13,7 @@
   --stage-confirmed: #4b7bd1;
   --stage-packed: #e0982c;
   --stage-shipped: #2e9e5b;
+  --active: #0891b2; /* teal — confirmed, in-flight, not yet shipped */
 
   /* Completeness colors */
   --c-full: #2e9e5b;
@@ -184,6 +185,16 @@ body {
   padding: 5px 11px;
   border-radius: 999px;
   background: #d32f2f;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.active-pill {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--active);
   color: #fff;
   white-space: nowrap;
 }

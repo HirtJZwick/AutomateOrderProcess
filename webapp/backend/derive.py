@@ -65,3 +65,16 @@ def derive_completeness(order: dict, has_checklist: bool = True) -> dict:
     else:
         level = "low"
     return {"percent": percent, "present": present, "total": total, "level": level}
+
+
+def derive_active(order: dict) -> bool:
+    """True when the order has an OC date but no shipping date and is not cancelled.
+
+    These are confirmed, in-flight orders that Eric is actively managing before
+    the machine reaches the customer.
+    """
+    return (
+        _has(order, "received_oc_from_zrx")
+        and not _has(order, "shipping_date")
+        and order.get("cancelled") != "1"
+    )

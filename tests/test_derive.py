@@ -1,4 +1,4 @@
-from webapp.backend.derive import derive_stage, derive_completeness
+from webapp.backend.derive import derive_stage, derive_completeness, derive_active
 
 
 # ── Stage tests ───────────────────────────────────────────────────────────────
@@ -76,3 +76,25 @@ def test_completeness_counts_present_fields():
     result = derive_completeness(order)
     assert result["present"] == 2
     assert result["total"] == 11
+
+
+# ── Active tests ──────────────────────────────────────────────────────────────
+
+def test_active_when_oc_date_set_no_shipping():
+    assert derive_active({"received_oc_from_zrx": "2/1/2026"}) is True
+
+
+def test_not_active_when_shipping_date_also_set():
+    assert derive_active({"received_oc_from_zrx": "2/1/2026", "shipping_date": "5/1/2026"}) is False
+
+
+def test_not_active_when_no_oc_date():
+    assert derive_active({"order_date": "1/1/2026"}) is False
+
+
+def test_not_active_when_cancelled():
+    assert derive_active({"received_oc_from_zrx": "2/1/2026", "cancelled": "1"}) is False
+
+
+def test_not_active_when_oc_date_whitespace_only():
+    assert derive_active({"received_oc_from_zrx": "   "}) is False

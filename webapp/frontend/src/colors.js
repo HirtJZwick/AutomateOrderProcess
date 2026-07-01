@@ -14,6 +14,8 @@ export const LEVEL_COLORS = {
   missing: "var(--c-missing)",
 };
 
+export const ACTIVE_COLOR = "var(--active)";
+
 export function stageColor(name) {
   return STAGE_COLORS[name] || "var(--stage-new)";
 }
