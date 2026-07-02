@@ -4,8 +4,6 @@ import StageBand from "./StageBand";
 import CompletenessBar from "./CompletenessBar";
 import { stageColor } from "../colors";
 
-const MILESTONE_PHASES = ["Pre-FAT", "FAT", "Logistics", "Install", "Qualification"];
-
 function EditField({ label, fieldKey, value, onChange, full, multiline }) {
   return (
     <div className={`field${full ? " full" : ""}`}>
@@ -213,14 +211,6 @@ export default function OrderDetail({ dossier, onClose, onOrderUpdated }) {
                   </li>
                 ))}
               </ul>
-            </Section>
-
-            <Section title="FAT plan phases (reference)">
-              <div className="phases">
-                {MILESTONE_PHASES.map((p) => (
-                  <span className="phase-tag" key={p}>{p}</span>
-                ))}
-              </div>
             </Section>
           </>
         )}
