@@ -77,7 +77,8 @@ export default function OrderDetail({ dossier, onClose, onOrderUpdated }) {
 
   const isDirty = Object.keys(edits).length > 0;
 
-  async function handleSave() {
+  async function handleClose() {
+    if (!isDirty) { onClose(); return; }
     setSaving(true);
     setActionError(null);
     setActionMessage(null);
@@ -85,10 +86,10 @@ export default function OrderDetail({ dossier, onClose, onOrderUpdated }) {
       const res = await api.updateOrder(dossier, edits);
       setData(res);
       setEdits({});
-      setActionMessage("Changes saved.");
       onOrderUpdated?.();
+      onClose();
     } catch (e) {
-      setActionError(e.message);
+      setActionError(`Could not save changes: ${e.message}`);
     } finally {
       setSaving(false);
     }
@@ -115,7 +116,7 @@ export default function OrderDetail({ dossier, onClose, onOrderUpdated }) {
   const stageName = data?.stage?.name || "New";
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className="overlay" onClick={handleClose}>
       <div className="drawer" onClick={stop}>
         <div className="drawer-head">
           <div>
@@ -131,9 +132,10 @@ export default function OrderDetail({ dossier, onClose, onOrderUpdated }) {
               disabled={refreshing}
               title="Re-scan the order folder for new documents and fill any empty fields"
             >
-              {refreshing ? "Refreshing…" : "↻ Refresh"}
+                {refreshing ? "Refreshing…" : "↻ Refresh"}
             </button>
-            <button className="close-x" onClick={onClose}>&times;</button>
+              {saving && <span style={{ fontSize: 12, color: "var(--muted)" }}>Saving…</span>}
+              <button className="close-x" onClick={handleClose} disabled={saving}>&times;</button>
           </div>
         </div>
 
@@ -201,15 +203,6 @@ export default function OrderDetail({ dossier, onClose, onOrderUpdated }) {
                 <EditField label="Service activity by"  fieldKey="service_activity_done_by" value={fieldValue("service_activity_done_by")} onChange={handleChange} />
               </div>
             </Section>
-
-            {isDirty && (
-              <div className="drawer-save-bar">
-                <span className="save-hint">Unsaved changes</span>
-                <button className="btn btn-sm" onClick={handleSave} disabled={saving}>
-                  {saving ? "Saving…" : "Save changes"}
-                </button>
-              </div>
-            )}
 
             <Section title={`Documents (${data.documents.length})`}>
               <ul className="doc-list">
