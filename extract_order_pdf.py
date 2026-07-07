@@ -61,23 +61,28 @@ def extract(pdf_path: str) -> dict:
     return {k: v for k, v in data.items() if v}
 
 
-def find_order_pdf(folder: str) -> str | None:
-    """Return an 'Order' PDF in `folder` (filename contains 'Order').
+def find_all_pdfs(folder: str) -> list[str]:
+    """Return all PDF files in `folder` root (non-recursive).
 
-    Prefers an Order Confirmation when several candidates exist.
+    Excludes temp files (~$...) and files with 'backup' in their name.
+    Sorted so Order Confirmation files come first, then alphabetically.
     """
     hits = [
         p
         for p in glob.glob(os.path.join(folder, "*.pdf"))
-        if "order" in os.path.basename(p).lower()
-        and not os.path.basename(p).startswith("~$")
+        if not os.path.basename(p).startswith("~$")
         and "backup" not in os.path.basename(p).lower()
     ]
-    if not hits:
-        return None
     hits.sort(key=lambda p: (0 if "confirmation" in os.path.basename(p).lower() else 1,
                              os.path.basename(p).lower()))
-    return hits[0]
+    return hits
+
+
+def find_order_pdf(folder: str) -> str | None:
+    """Return the best single Order PDF in `folder`, or None if not found."""
+    hits = find_all_pdfs(folder)
+    return hits[0] if hits else None
+
 
 
 def find_shipping_pdfs(folder: str) -> list[str]:

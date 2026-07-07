@@ -22,10 +22,13 @@ EVERY DAY
 
 FIRST-TIME CONFIGURATION
 -------------------------
-- When the dashboard opens, click the settings icon (top right) and
-  set the "Root Folder" to the folder that contains all your order folders
-  (the folder with the Checklist .docx files inside subfolders).
-- Click "Save", then click "Scan Orders" to load all orders.
+- The app already comes loaded with the existing orders, so you will
+  see order cards straight away.
+- To load NEW orders from your own files, click the settings icon
+  (top right) and set the "Root Folder" to the folder that contains all
+  your order folders (the folder with the Checklist .docx files inside
+  subfolders).
+- Click "Save", then click "Scan Orders" to load any new orders.
 
 TROUBLESHOOTING
 ---------------

@@ -30,7 +30,7 @@ import os
 
 import extract_checklist
 import extract_order_pdf
-import llm_extract
+import llm_extract_phi as llm_extract
 import storage
 
 # Filename-substring -> document category, for the documents list / completeness.
@@ -99,13 +99,19 @@ def ingest_folder(
     if not data.get("dossier_no"):
         return None
 
-    order_pdf = extract_order_pdf.find_order_pdf(folder)
-    if order_pdf:
-        data.update(extract_order_pdf.extract(order_pdf))     # header (PO, quotation)
+    # Header (PO/quotation numbers) — run regex over all PDFs, fill-empty merge
+    for pdf in extract_order_pdf.find_all_pdfs(folder):
+        for k, v in extract_order_pdf.extract(pdf).items():
+            if not data.get(k):
+                data[k] = v
+
+    # Contacts — single LLM call with text from all root PDFs
+    all_pdfs = extract_order_pdf.find_all_pdfs(folder)
+    if all_pdfs:
         try:
-            data.update(llm_extract.extract_order_contacts(order_pdf))  # contacts via LLM
+            data.update(llm_extract.extract_order_contacts(all_pdfs))
         except Exception as exc:
-            print(f"WARN: contact extraction failed for {order_pdf}: {exc}")
+            print(f"WARN: contact extraction failed for {folder}: {exc}")
 
     for shipping_pdf in extract_order_pdf.find_shipping_pdfs(folder):
         try:

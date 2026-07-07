@@ -15,7 +15,7 @@ CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
 def _raw_config() -> dict:
     cfg = {"root_folder": "", "db_path": "eric_orders.db"}
     if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
+        with open(CONFIG_PATH, "r", encoding="utf-8-sig") as fh:
             cfg.update(json.load(fh))
     return cfg
 

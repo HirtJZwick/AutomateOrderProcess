@@ -124,8 +124,8 @@ def extract_order_contacts(pdf_path: str) -> dict:
 _SHIP_PROMPT = (
     "This is a scanned freight delivery receipt / proof of delivery. "
     "Find the delivery date: look near labels like 'Result', 'Delivered', "
-    "'Date', or 'Ship'. It is usually next to the word 'Date' in the "
-    "results/signature area at the bottom. Read the digits carefully. "
+    "'Date', 'Ship' or 'Flight'. Usually when it was shipped using a plane, the flight date indicates the shipping date. "
+    "Read the digits carefully. "
     'Reply with ONLY a JSON object: {"shipping_date": "M/D/YYYY"}. '
     "Normalise any 2-digit year to 4 digits (e.g. 26 -> 2026). "
     'If no date is found, reply: {"shipping_date": null}'
