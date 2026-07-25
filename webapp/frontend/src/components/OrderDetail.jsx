@@ -78,7 +78,7 @@ export default function OrderDetail({ dossier, onClose, onOrderUpdated }) {
   async function handleClose() {
     if (!isDirty) { onClose(); return; }
     setSaving(true);
-    setActionError(null);
+    setActionError(null);  
     setActionMessage(null);
     try {
       const res = await api.updateOrder(dossier, edits);
@@ -132,6 +132,12 @@ export default function OrderDetail({ dossier, onClose, onOrderUpdated }) {
             >
                 {refreshing ? "Refreshing…" : "↻ Refresh"}
             </button>
+            <span
+              className="ai-badge"
+              title="Refresh uses AI to read contacts and the shipping date from the order's documents"
+            >
+              ✨ AI
+            </span>
               {saving && <span style={{ fontSize: 12, color: "var(--muted)" }}>Saving…</span>}
               <button className="close-x" onClick={handleClose} disabled={saving}>&times;</button>
           </div>
