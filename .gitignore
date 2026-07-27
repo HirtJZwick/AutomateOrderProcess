@@ -24,10 +24,12 @@ OrderTracker.zip
 
 # Individual files
 run_python.ps1
+AGENTS.md
+ERIC_DISTRIBUTION_PLAN.md
+IMPLEMENTATION_PLAN.md
+README.md
+Order_Tracker.bat
+start.bat
+install.bat
 
-# Secrets
-llm_config.py
 
-# retrieve_shipping_date.py artifacts
-retrieve_shipping_date_state.json
-shipping_date_results/
