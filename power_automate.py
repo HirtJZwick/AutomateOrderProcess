@@ -36,7 +36,12 @@ import os
 
 import requests
 
-# Update these two URLs if the flows are recreated/redeployed.
+# Fallback defaults (the developer's own flows). Each installation should
+# normally set its own "oc_contacts_flow_url" / "shipping_date_flow_url" in
+# config.json instead — see webapp/backend/settings.py — since every person
+# running this app needs their own Power Automate flows (a flow can only
+# write into workbooks it has been granted access to). These constants only
+# exist so an install with no config.json override keeps working as before.
 OC_CONTACTS_FLOW_URL = (
     "https://4f44d0967de9e2629f0d37cc1dbdf9.01.environment.api.powerplatform.com:443"
     "/powerautomate/automations/direct/cu/24/workflows/4335734a62ce44d5aba333a45a2ec004"
@@ -52,6 +57,18 @@ SHIPPING_DATE_FLOW_URL = (
 
 # Flows can take a while to read and process documents; wait generously.
 FLOW_TIMEOUT_SECONDS = 300
+
+
+def _configured_url(config_key: str, default_url: str) -> str:
+    """Return the flow URL from config.json's `config_key`, falling back to
+    `default_url` (this module's hard-coded default) if unset/blank."""
+    try:
+        from webapp.backend.settings import load_config
+
+        configured = load_config().get(config_key)
+    except Exception:
+        configured = None
+    return configured or default_url
 
 
 def _onedrive_relative_path(folder_path: str) -> str:
@@ -83,7 +100,7 @@ def trigger_oc_contacts_flow(folder_path: str) -> bool:
     print(f"Triggering OC contacts flow for folderPath: local={folder_path!r} relative={relative_path!r}")
     try:
         resp = requests.post(
-            OC_CONTACTS_FLOW_URL,
+            _configured_url("oc_contacts_flow_url", OC_CONTACTS_FLOW_URL),
             json={"folderPath": relative_path},
             timeout=FLOW_TIMEOUT_SECONDS,
         )
@@ -102,7 +119,7 @@ def trigger_shipping_date_flow(dossier_no: str, folder_path: str) -> bool:
     )
     try:
         resp = requests.post(
-            SHIPPING_DATE_FLOW_URL,
+            _configured_url("shipping_date_flow_url", SHIPPING_DATE_FLOW_URL),
             json={"dossier_no": dossier_no, "folderPath": relative_path},
             timeout=FLOW_TIMEOUT_SECONDS,
         )

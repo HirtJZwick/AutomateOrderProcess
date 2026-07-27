@@ -25,11 +25,16 @@ OrderTracker.zip
 # Individual files
 run_python.ps1
 AGENTS.md
-ERIC_DISTRIBUTION_PLAN.md
-IMPLEMENTATION_PLAN.md
 README.md
 Order_Tracker.bat
 start.bat
 install.bat
+
+
+# Local database (contains live order data, not source code)
+eric_orders.db
+make_dist.bat
+
+
 
 

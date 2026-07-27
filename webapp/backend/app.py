@@ -4,8 +4,8 @@ app.py
 FastAPI backend for the order-tracking platform.
 
 Endpoints:
-  GET   /api/config                   -> current settings (root folder, db path)
-  POST  /api/config                   -> update scan root folder
+  GET   /api/config                   -> current settings (root folder, db path, flow URLs, excel root)
+  POST  /api/config                   -> update scan root folder / flow URLs / excel root
   GET   /api/orders                   -> order summaries (+ derived stage & completeness)
   GET   /api/orders/{dossier}         -> full order detail incl. documents
   PATCH /api/orders/{dossier}         -> save manual field edits (never touches dossier_no)
@@ -91,20 +91,37 @@ def get_config() -> dict:
         "root_folder": root,
         "db_path": cfg["db_path"],
         "root_exists": bool(root) and os.path.isdir(root),
+        "oc_contacts_flow_url": cfg.get("oc_contacts_flow_url", ""),
+        "shipping_date_flow_url": cfg.get("shipping_date_flow_url", ""),
+        "excel_root": cfg.get("excel_root", ""),
     }
 
 
 class ConfigUpdate(BaseModel):
-    root_folder: str
+    root_folder: str | None = None
+    oc_contacts_flow_url: str | None = None
+    shipping_date_flow_url: str | None = None
+    excel_root: str | None = None
 
 
 @app.post("/api/config")
 def update_config(update: ConfigUpdate) -> dict:
-    root = (update.root_folder or "").strip().strip('"')
-    save_config({"root_folder": root})
+    updates: dict = {}
+    if update.root_folder is not None:
+        updates["root_folder"] = update.root_folder.strip().strip('"')
+    for key in ("oc_contacts_flow_url", "shipping_date_flow_url", "excel_root"):
+        value = getattr(update, key)
+        if value is not None:
+            updates[key] = value.strip()
+    save_config(updates)
+    current = load_config()
+    root = updates.get("root_folder", current["root_folder"])
     return {
         "root_folder": root,
         "root_exists": bool(root) and os.path.isdir(root),
+        "oc_contacts_flow_url": updates.get("oc_contacts_flow_url", current.get("oc_contacts_flow_url", "")),
+        "shipping_date_flow_url": updates.get("shipping_date_flow_url", current.get("shipping_date_flow_url", "")),
+        "excel_root": updates.get("excel_root", current.get("excel_root", "")),
     }
 
 

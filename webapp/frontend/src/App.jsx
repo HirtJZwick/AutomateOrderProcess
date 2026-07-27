@@ -24,6 +24,16 @@ export default function App() {
   const [rootFolder, setRootFolder] = useState("");
   const [rootExists, setRootExists] = useState(false);
   const [savedFolder, setSavedFolder] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [ocFlowUrl, setOcFlowUrl] = useState("");
+  const [shippingFlowUrl, setShippingFlowUrl] = useState("");
+  const [excelRoot, setExcelRoot] = useState("");
+  const [savedAdvanced, setSavedAdvanced] = useState({
+    oc_contacts_flow_url: "",
+    shipping_date_flow_url: "",
+    excel_root: "",
+  });
+  const [savingAdvanced, setSavingAdvanced] = useState(false);
   const [selected, setSelected] = useState(() => {
     return new URLSearchParams(window.location.search).get("order");
   });
@@ -50,12 +60,25 @@ export default function App() {
         setRootFolder(c.root_folder || "");
         setSavedFolder(c.root_folder || "");
         setRootExists(!!c.root_exists);
+        const advanced = {
+          oc_contacts_flow_url: c.oc_contacts_flow_url || "",
+          shipping_date_flow_url: c.shipping_date_flow_url || "",
+          excel_root: c.excel_root || "",
+        };
+        setOcFlowUrl(advanced.oc_contacts_flow_url);
+        setShippingFlowUrl(advanced.shipping_date_flow_url);
+        setExcelRoot(advanced.excel_root);
+        setSavedAdvanced(advanced);
       })
       .catch((e) => setError(e.message));
     loadOrders();
   }, []);
 
   const dirty = rootFolder.trim() !== savedFolder.trim();
+  const dirtyAdvanced =
+    ocFlowUrl.trim() !== savedAdvanced.oc_contacts_flow_url.trim() ||
+    shippingFlowUrl.trim() !== savedAdvanced.shipping_date_flow_url.trim() ||
+    excelRoot.trim() !== savedAdvanced.excel_root.trim();
 
   async function handleSaveFolder() {
     setSaving(true);
@@ -75,6 +98,33 @@ export default function App() {
       setError(e.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSaveAdvanced() {
+    setSavingAdvanced(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const res = await api.setAdvancedConfig({
+        oc_contacts_flow_url: ocFlowUrl.trim(),
+        shipping_date_flow_url: shippingFlowUrl.trim(),
+        excel_root: excelRoot.trim(),
+      });
+      const advanced = {
+        oc_contacts_flow_url: res.oc_contacts_flow_url || "",
+        shipping_date_flow_url: res.shipping_date_flow_url || "",
+        excel_root: res.excel_root || "",
+      };
+      setOcFlowUrl(advanced.oc_contacts_flow_url);
+      setShippingFlowUrl(advanced.shipping_date_flow_url);
+      setExcelRoot(advanced.excel_root);
+      setSavedAdvanced(advanced);
+      setMessage("Flow/workbook settings saved. Restart the app for the change to take effect.");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSavingAdvanced(false);
     }
   }
 
@@ -169,7 +219,65 @@ export default function App() {
         <button className="btn secondary" onClick={handleSaveFolder} disabled={saving || !dirty}>
           {saving ? "Saving…" : "Save"}
         </button>
+        <button
+          className="btn secondary"
+          onClick={() => setAdvancedOpen((v) => !v)}
+        >
+          {advancedOpen ? "Hide flow settings" : "Flow & workbook settings"}
+        </button>
       </div>
+
+      {advancedOpen && (
+        <div className="settings-bar advanced-settings">
+          <div className="advanced-grid">
+            <label className="settings-label" htmlFor="oc-flow-url">
+              OC contacts flow URL
+            </label>
+            <input
+              id="oc-flow-url"
+              className="folder-input"
+              type="text"
+              value={ocFlowUrl}
+              placeholder="Power Automate HTTP-trigger URL for the OC Contacts flow"
+              spellCheck={false}
+              onChange={(e) => setOcFlowUrl(e.target.value)}
+            />
+
+            <label className="settings-label" htmlFor="ship-flow-url">
+              Shipping date flow URL
+            </label>
+            <input
+              id="ship-flow-url"
+              className="folder-input"
+              type="text"
+              value={shippingFlowUrl}
+              placeholder="Power Automate HTTP-trigger URL for the Shipping Date flow"
+              spellCheck={false}
+              onChange={(e) => setShippingFlowUrl(e.target.value)}
+            />
+
+            <label className="settings-label" htmlFor="excel-root">
+              Workbook folder
+            </label>
+            <input
+              id="excel-root"
+              className="folder-input"
+              type="text"
+              value={excelRoot}
+              placeholder="C:\path\to\OneDrive folder containing OC_Contacts.xlsx and Dossier_Shipping_Date.xlsx"
+              spellCheck={false}
+              onChange={(e) => setExcelRoot(e.target.value)}
+            />
+          </div>
+          <button
+            className="btn secondary"
+            onClick={handleSaveAdvanced}
+            disabled={savingAdvanced || !dirtyAdvanced}
+          >
+            {savingAdvanced ? "Saving…" : "Save"}
+          </button>
+        </div>
+      )}
 
       {message && <div className="toast">{message}</div>}
       {error && <div className="toast error">{error}</div>}

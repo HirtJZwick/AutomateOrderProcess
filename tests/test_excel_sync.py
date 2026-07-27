@@ -147,3 +147,20 @@ def test_lookup_latest_shipping_result_handles_generic_subfolder_name(tmp_path):
         "reasoning": "The files only contain freight quotes, not a confirmed shipping date.",
         "source_document": None,
     }
+
+
+# ── _excel_root (per-installation workbook folder) ───────────────────────────
+
+def test_excel_root_uses_configured_value_when_set(monkeypatch):
+    monkeypatch.setattr(
+        "webapp.backend.settings.load_config",
+        lambda: {"excel_root": r"C:\Users\Eric\OneDrive - ZwickRoell GmbH & Co. KG\Documents\EricProject"},
+    )
+    assert excel_sync._excel_root() == (
+        r"C:\Users\Eric\OneDrive - ZwickRoell GmbH & Co. KG\Documents\EricProject"
+    )
+
+
+def test_excel_root_falls_back_to_default_when_config_blank(monkeypatch):
+    monkeypatch.setattr("webapp.backend.settings.load_config", lambda: {"excel_root": ""})
+    assert excel_sync._excel_root() == excel_sync._DEFAULT_ERIC_PROJECT_ROOT

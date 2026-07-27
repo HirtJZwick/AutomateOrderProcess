@@ -36,24 +36,6 @@ foreach ($name in @("install.bat", "start.bat", "README_ERIC.txt")) {
     if (Test-Path $src) { Stage-File $src $name }
 }
 
-# ── llm_config.py — ship a sanitized version (no real token) ──────────────────
-$blankLlmConfig = @'
-"""
-llm_config.py
--------------
-GitHub Models configuration for LLM-based PDF extraction (contacts, shipping date).
-
-To enable LLM features:
-  1. Create a free GitHub account at https://github.com
-  2. Generate a Personal Access Token (Settings > Developer Settings > PATs > Fine-grained)
-  3. Paste it below as GITHUB_TOKEN
-"""
-GITHUB_TOKEN = ""   # <-- paste your GitHub PAT here
-BASE_URL = "https://models.github.ai/inference"
-MODEL = "openai/gpt-5-mini"
-'@
-Set-Content -Path (Join-Path $staging "llm_config.py") -Value $blankLlmConfig -Encoding UTF8
-
 # ── webapp/backend ────────────────────────────────────────────────────────────
 $backendSrc = Join-Path $root "webapp\backend"
 $backendDst = Join-Path $staging "webapp\backend"
@@ -73,9 +55,15 @@ if (-not (Test-Path $distSrc)) {
 $distDst = Join-Path $staging "webapp\frontend\dist"
 Copy-Item $distSrc $distDst -Recurse -Force
 
-# ── config.json — ship a BLANK root_folder so Eric configures via the UI ──────
-$blankConfig = '{"root_folder": "", "db_path": "eric_orders.db"}'
-Set-Content -Path (Join-Path $staging "config.json") -Value $blankConfig -Encoding UTF8
+# ── config.json / eric_orders.db — intentionally NOT bundled ─────────────────
+# This zip is a code-only update package. It must never include config.json or
+# eric_orders.db: on a machine that already has an install, extracting this
+# zip with overwrite must never touch the receiving machine's own root_folder
+# setting or live order data. The app's storage layer auto-migrates the schema
+# (adds any new columns) the first time the updated code runs against an
+# existing database, so an existing eric_orders.db does not need to be replaced.
+# (A brand-new install still works: app.py creates a blank config.json/db on
+# first run if they don't exist.)
 
 # ── Zip the staging folder ────────────────────────────────────────────────────
 Write-Host "Creating OrderTracker.zip..."

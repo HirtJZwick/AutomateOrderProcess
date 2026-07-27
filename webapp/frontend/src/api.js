@@ -17,6 +17,12 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ root_folder }),
     }),
+  setAdvancedConfig: ({ oc_contacts_flow_url, shipping_date_flow_url, excel_root }) =>
+    http("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ oc_contacts_flow_url, shipping_date_flow_url, excel_root }),
+    }),
   listOrders: () => http("/api/orders"),
   getOrder: (dossier) => http(`/api/orders/${encodeURIComponent(dossier)}`),
   updateOrder: (dossier, fields) =>

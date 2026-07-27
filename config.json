@@ -1,4 +1,7 @@
 {
   "root_folder": "C:\\Users\\Hirtj\\OneDrive - ZwickRoell GmbH & Co. KG\\Documents\\EricProject",
-  "db_path": "eric_orders.db"
+  "db_path": "eric_orders.db",
+  "oc_contacts_flow_url": "",
+  "shipping_date_flow_url": "",
+  "excel_root": ""
 }

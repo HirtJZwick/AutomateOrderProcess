@@ -90,3 +90,37 @@ def test_trigger_shipping_date_flow_returns_false_on_request_exception(monkeypat
 
     monkeypatch.setattr(requests, "post", fake_post)
     assert power_automate.trigger_shipping_date_flow("DO001", _LOCAL_PATH) is False
+
+
+# ── config-driven flow URLs (per-installation flows) ─────────────────────────
+
+def test_trigger_oc_contacts_flow_uses_configured_url_when_set(monkeypatch):
+    monkeypatch.setattr(
+        "webapp.backend.settings.load_config",
+        lambda: {"oc_contacts_flow_url": "https://example.com/erics-oc-flow"},
+    )
+    captured = {}
+
+    def fake_post(url, json, timeout):
+        captured["url"] = url
+        return _FakeResponse(200)
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    power_automate.trigger_oc_contacts_flow(_LOCAL_PATH)
+    assert captured["url"] == "https://example.com/erics-oc-flow"
+
+
+def test_trigger_shipping_date_flow_falls_back_to_default_url_when_config_blank(monkeypatch):
+    monkeypatch.setattr(
+        "webapp.backend.settings.load_config",
+        lambda: {"shipping_date_flow_url": ""},
+    )
+    captured = {}
+
+    def fake_post(url, json, timeout):
+        captured["url"] = url
+        return _FakeResponse(200)
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    power_automate.trigger_shipping_date_flow("DO001", _LOCAL_PATH)
+    assert captured["url"] == power_automate.SHIPPING_DATE_FLOW_URL

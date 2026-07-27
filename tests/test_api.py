@@ -94,6 +94,50 @@ def test_update_config_returns_root_folder(api_client, tmp_path):
     assert res.json()["root_folder"] == str(tmp_path)
 
 
+def test_get_config_exposes_flow_urls_and_excel_root(api_client):
+    cfg = {
+        "root_folder": "",
+        "db_path": ":memory:",
+        "oc_contacts_flow_url": "https://example.com/oc",
+        "shipping_date_flow_url": "https://example.com/ship",
+        "excel_root": r"C:\Eric\EricProject",
+    }
+    with patch("webapp.backend.app.load_config", return_value=cfg):
+        res = api_client.get("/api/config")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["oc_contacts_flow_url"] == "https://example.com/oc"
+    assert body["shipping_date_flow_url"] == "https://example.com/ship"
+    assert body["excel_root"] == r"C:\Eric\EricProject"
+
+
+def test_update_config_saves_flow_urls_and_excel_root(api_client, tmp_path):
+    saved = {}
+
+    def fake_save_config(updates):
+        saved.update(updates)
+
+    with patch("webapp.backend.app.save_config", side_effect=fake_save_config), \
+         patch("webapp.backend.app.load_config", return_value={"root_folder": ""}):
+        res = api_client.post("/api/config", json={
+            "oc_contacts_flow_url": "https://example.com/oc",
+            "shipping_date_flow_url": "https://example.com/ship",
+            "excel_root": r"C:\Eric\EricProject",
+        })
+    assert res.status_code == 200
+    body = res.json()
+    assert body["oc_contacts_flow_url"] == "https://example.com/oc"
+    assert body["shipping_date_flow_url"] == "https://example.com/ship"
+    assert body["excel_root"] == r"C:\Eric\EricProject"
+    assert saved == {
+        "oc_contacts_flow_url": "https://example.com/oc",
+        "shipping_date_flow_url": "https://example.com/ship",
+        "excel_root": r"C:\Eric\EricProject",
+    }
+    # root_folder was not part of this update, so it must not be touched.
+    assert "root_folder" not in saved
+
+
 # ── PATCH /api/orders/{dossier} ───────────────────────────────────────────────
 
 def test_patch_order_updates_field(api_client, test_db_path):

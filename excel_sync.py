@@ -28,12 +28,39 @@ import openpyxl
 
 import storage
 
-# Update this if the shared workbook location changes.
-_ERIC_PROJECT_ROOT = (
+# Fallback default (the developer's own shared folder) used only when
+# config.json has no "excel_root" set. Each installation should normally set
+# its own "excel_root" in config.json to the local, OneDrive-synced folder
+# holding its own two flow-output workbooks — see webapp/backend/settings.py.
+_DEFAULT_ERIC_PROJECT_ROOT = (
     r"C:\Users\Hirtj\OneDrive - ZwickRoell GmbH & Co. KG\Documents\EricProject"
 )
-OC_CONTACTS_PATH = os.path.join(_ERIC_PROJECT_ROOT, "OC_Contacts.xlsx")
-SHIPPING_DATE_PATH = os.path.join(_ERIC_PROJECT_ROOT, "Dossier_Shipping_Date.xlsx")
+
+
+def _excel_root() -> str:
+    try:
+        from webapp.backend.settings import load_config
+
+        configured = load_config().get("excel_root")
+    except Exception:
+        configured = None
+    return configured or _DEFAULT_ERIC_PROJECT_ROOT
+
+
+def _oc_contacts_path() -> str:
+    return os.path.join(_excel_root(), "OC_Contacts.xlsx")
+
+
+def _shipping_date_path() -> str:
+    return os.path.join(_excel_root(), "Dossier_Shipping_Date.xlsx")
+
+
+# Kept as module-level names for backwards compatibility with any external
+# callers; resolved once at import time. Prefer _oc_contacts_path() /
+# _shipping_date_path() internally so a config.json change takes effect after
+# a restart without needing to re-import this module.
+OC_CONTACTS_PATH = _oc_contacts_path()
+SHIPPING_DATE_PATH = _shipping_date_path()
 
 # OC_Contacts.xlsx column -> orders table column.
 _OC_CONTACT_COLUMNS = {

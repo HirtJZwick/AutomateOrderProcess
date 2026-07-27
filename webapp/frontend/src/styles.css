@@ -99,6 +99,20 @@ body {
 .folder-status.ok { color: var(--c-full); }
 .folder-status.bad { color: var(--c-low); }
 
+.advanced-settings {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.advanced-grid {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  align-items: center;
+  gap: 10px 12px;
+  flex: 1;
+  min-width: 320px;
+}
+.advanced-grid .settings-label { white-space: normal; }
+
 .container { padding: 24px 28px; }
 
 .toast {
