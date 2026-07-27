@@ -62,7 +62,8 @@ def extract(pdf_path: str) -> dict:
 
 
 def find_all_pdfs(folder: str) -> list[str]:
-    """Return all PDF files in `folder` root (non-recursive).
+    """Return all PDF files in `folder` root (non-recursive) whose filename
+    contains "oc" or "order" (case-insensitive).
 
     Excludes temp files (~$...) and files with 'backup' in their name.
     Sorted so Order Confirmation files come first, then alphabetically.
@@ -72,6 +73,7 @@ def find_all_pdfs(folder: str) -> list[str]:
         for p in glob.glob(os.path.join(folder, "*.pdf"))
         if not os.path.basename(p).startswith("~$")
         and "backup" not in os.path.basename(p).lower()
+        and ("oc" in os.path.basename(p).lower() or "order" in os.path.basename(p).lower())
     ]
     hits.sort(key=lambda p: (0 if "confirmation" in os.path.basename(p).lower() else 1,
                              os.path.basename(p).lower()))
@@ -85,22 +87,25 @@ def find_order_pdf(folder: str) -> str | None:
 
 
 
-def find_shipping_pdfs(folder: str) -> list[str]:
-    """Return delivery PDFs inside the 'Shipping Documents and Invoices' subfolder.
+_SHIPPING_FILENAME_KEYWORDS = ("shipping", "invoice", "quote")
 
-    Only PDFs whose filename contains 'delivery' (case-insensitive) are returned.
-    Returns an empty list if that subfolder does not exist.
+
+def find_shipping_pdfs(folder: str) -> list[str]:
+    """Return shipping-related PDFs inside the 'Shipping Documents and Invoices'
+    subfolder.
+
+    Only searches within that subfolder — never the rest of the order folder.
+    Returns an empty list if the subfolder does not exist. Of the PDFs found,
+    only those whose filename contains "shipping", "invoice", or "quote"
+    (case-insensitive) are returned.
     """
-    print(folder)
-    #shipping_dir = os.path.join(folder, SHIPPING_SUBFOLDER)
-    #print("Looking for shipping PDFs in:", shipping_dir)
-    if not os.path.isdir(folder):
+    shipping_dir = os.path.join(folder, SHIPPING_SUBFOLDER)
+    if not os.path.isdir(shipping_dir):
         return []
-    print("Shipping subfolder found:", folder)
     hits = [
         p
-        for p in glob.glob(os.path.join(folder, "**", "*.pdf"), recursive=True)
-        if "invoice" in os.path.basename(p).lower()
+        for p in glob.glob(os.path.join(shipping_dir, "**", "*.pdf"), recursive=True)
+        if any(kw in os.path.basename(p).lower() for kw in _SHIPPING_FILENAME_KEYWORDS)
         and not os.path.basename(p).startswith("~$")
     ]
     return sorted(hits)

@@ -24,6 +24,24 @@ from datetime import datetime, timezone
 
 DEFAULT_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eric_orders.db")
 
+
+def folder_identity(path: str) -> str:
+    """Normalized identity key for an order folder: final folder name only.
+
+    The same shared SharePoint order folder can appear under different
+    OneDrive synchronization roots for different users (e.g. `C:\\Users\\Hirtj\\
+    OneDrive - ...\\EricProject\\DO860728 Acom Labs OPP450766` vs. `C:\\Users\\
+    MilanE\\OneDrive - ...\\EricProject\\DO860728 Acom Labs OPP450766`), so the
+    full absolute path is not a stable identity. Only the final folder name is
+    compared, normalized for case and trailing separators (Windows semantics).
+
+    Used by `ingest.scan_new`/`ingest._folder_identity` to match on-disk
+    folders against known orders, and by `excel_sync.py` to match rows in the
+    shared Excel workbooks back to a local order folder.
+    """
+    name = os.path.basename(os.path.normpath(path))
+    return os.path.normcase(name)
+
 # All columns we persist. Order-key first, then the extracted fields.
 COLUMNS = [
     "dossier_no",
@@ -67,6 +85,7 @@ COLUMNS = [
     "rsm_email",
     "source_folder",
     "shipping_date",
+    "shipping_date_reason",
     "cancelled",
 ]
 
@@ -204,6 +223,36 @@ def list_source_folders(conn: sqlite3.Connection) -> set[str]:
     return {row[0] for row in cur.fetchall()}
 
 
+def list_dossier_source_folders(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    """Return (dossier_no, source_folder) pairs for every order with a folder.
+
+    Used by `ingest.scan_new` to match on-disk folders against known orders by
+    their final folder name (not the full path), since the same shared
+    SharePoint order folder can appear under different OneDrive roots for
+    different users.
+    """
+    cur = conn.execute(
+        "SELECT dossier_no, source_folder FROM orders "
+        "WHERE source_folder IS NOT NULL AND source_folder != ''"
+    )
+    return [(row[0], row[1]) for row in cur.fetchall()]
+
+
+def update_source_folder(conn: sqlite3.Connection, dossier_no: str, source_folder: str) -> None:
+    """Rebind an existing order's `source_folder` to a new absolute path.
+
+    Used when the same order folder (matched by final folder name) is found
+    under a different OneDrive synchronization root than what is currently
+    stored. Only `source_folder` and `updated_at` are touched — no other
+    extracted or manually edited fields are affected.
+    """
+    conn.execute(
+        'UPDATE orders SET "source_folder"=?, "updated_at"=? WHERE "dossier_no"=?',
+        (source_folder, datetime.now(timezone.utc).isoformat(timespec="seconds"), dossier_no),
+    )
+    conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Partial-update helpers (isolation point for future DB backend swaps)
 # ---------------------------------------------------------------------------
@@ -258,13 +307,19 @@ def update_order_fields(
 
 
 def fill_empty_fields(
-    conn: sqlite3.Connection, dossier_no: str, data: dict
+    conn: sqlite3.Connection, dossier_no: str, data: dict, force_fields: set[str] | None = None
 ) -> dict | None:
     """Merge extracted data into an existing order, filling only empty columns.
 
     Used by the per-order refresh so that manually edited (or previously
     extracted) values are never overwritten. Documents are handled separately
     by replace_documents.
+
+    `force_fields` names columns that are always overwritten with the latest
+    extracted value (when non-empty), even if the DB already holds a value —
+    used for system-derived fields that are never manually edited (e.g.
+    `shipping_date_reason`, which must track the *current* explanation from
+    the flow rather than getting stuck on a stale one).
 
     If the order row does not yet exist, falls back to a full upsert_order.
     Returns the resulting order dict.
@@ -274,10 +329,12 @@ def fill_empty_fields(
         upsert_order(conn, data)
         return get_order(conn, dossier_no)
 
+    force_fields = force_fields or set()
     updates = {
         k: data[k]
         for k in _EDITABLE
-        if k in data and not _is_empty(data.get(k)) and _is_empty(current.get(k))
+        if k in data and not _is_empty(data.get(k))
+        and (k in force_fields or _is_empty(current.get(k)))
     }
     _update_columns(conn, dossier_no, updates)
     return get_order(conn, dossier_no)
