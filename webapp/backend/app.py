@@ -62,6 +62,7 @@ _SUMMARY_FIELDS = [
     "industry",
     "order_date",
     "shipping_date",
+    "shipping_date_reason",
     "po_received_on",
     "received_oc_from_zrx",
     "packing_details_from_zrx",
@@ -185,6 +186,7 @@ def refresh_order(dossier: str) -> dict:
         "documents": result["documents"],
         "stage": derive.derive_stage(order),
         "completeness": derive.derive_completeness(order),
+        "shipping_date_warning": result.get("shipping_date_warning"),
     }
 
 

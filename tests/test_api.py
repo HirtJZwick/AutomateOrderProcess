@@ -52,6 +52,25 @@ def test_get_orders_includes_stage(api_client, test_db_path):
     assert orders[0]["stage"]["name"] == "Shipped"
 
 
+def test_shipping_date_reason_exposed_on_list_and_detail(api_client, test_db_path):
+    conn = storage.connect(test_db_path)
+    storage.upsert_order(conn, {
+        "dossier_no": "D003",
+        "shipping_date": "5/15/2026",
+        "shipping_date_reason": "Confirmed on the packing list",
+    })
+    conn.close()
+
+    list_res = api_client.get("/api/orders")
+    assert list_res.status_code == 200
+    orders = list_res.json()["orders"]
+    assert orders[0]["shipping_date_reason"] == "Confirmed on the packing list"
+
+    detail_res = api_client.get("/api/orders/D003")
+    assert detail_res.status_code == 200
+    assert detail_res.json()["order"]["shipping_date_reason"] == "Confirmed on the packing list"
+
+
 def test_scan_empty_folder_returns_summary(api_client):
     # tmp_path has no Checklist files → folders_found == 0
     res = api_client.post("/api/scan")
@@ -144,6 +163,41 @@ def test_refresh_order_returns_updated_order(api_client, test_db_path, tmp_path,
     assert "documents" in body
     assert "stage" in body
     assert "completeness" in body
+    assert body["shipping_date_warning"] is None
+
+
+def test_refresh_order_returns_shipping_date_warning_when_not_found(api_client, test_db_path, tmp_path, monkeypatch):
+    folder = tmp_path / "DO022 Corp"
+    folder.mkdir()
+    (folder / "Checklist.docx").write_bytes(b"")
+
+    conn = storage.connect(test_db_path)
+    storage.upsert_order(conn, {
+        "dossier_no": "DO022",
+        "customer_name": "Corp",
+        "source_folder": str(folder),
+    })
+    conn.close()
+
+    monkeypatch.setattr("extract_checklist.find_checklist", lambda f: str(folder / "Checklist.docx"))
+    monkeypatch.setattr("extract_checklist.extract", lambda p: {"dossier_no": "DO022"})
+    monkeypatch.setattr("extract_order_pdf.find_order_pdf", lambda f: None)
+    monkeypatch.setattr("extract_order_pdf.find_all_pdfs", lambda f: [])
+    monkeypatch.setattr(
+        "extract_order_pdf.find_shipping_pdfs",
+        lambda f: [str(folder / "Shipping Documents and Invoices" / "Invoice.pdf")],
+    )
+    monkeypatch.setattr("power_automate.trigger_shipping_date_flow", lambda dossier_no, folder: True)
+    monkeypatch.setattr(
+        "excel_sync.lookup_shipping_date",
+        lambda folder: {"shipping_date": None, "reasoning": "No shipping documents uploaded yet", "source_document": None},
+    )
+
+    res = api_client.post("/api/orders/DO022/refresh")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["order"].get("shipping_date") in (None, "")
+    assert "No shipping documents uploaded yet" in body["shipping_date_warning"]
 
 
 def test_refresh_order_not_found_returns_400(api_client):

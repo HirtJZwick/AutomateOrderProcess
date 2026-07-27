@@ -139,12 +139,63 @@ def test_update_order_fields_bumps_updated_at(db, sample_order):
     assert after > before
 
 
+# ---------------------------------------------------------------------------
+# list_dossier_source_folders / update_source_folder
+# ---------------------------------------------------------------------------
+
+def test_list_dossier_source_folders_returns_pairs(db, sample_order):
+    storage.upsert_order(db, sample_order)
+    pairs = storage.list_dossier_source_folders(db)
+    assert pairs == [("TEST001", r"C:\fake\TEST001 ACME")]
+
+
+def test_list_dossier_source_folders_excludes_empty(db):
+    storage.upsert_order(db, {"dossier_no": "NOFOLDER"})
+    assert storage.list_dossier_source_folders(db) == []
+
+
+def test_update_source_folder_changes_only_that_field(db, sample_order):
+    storage.upsert_order(db, sample_order)
+    new_path = r"C:\other\TEST001 ACME"
+    storage.update_source_folder(db, "TEST001", new_path)
+    result = storage.get_order(db, "TEST001")
+    assert result["source_folder"] == new_path
+    # Unrelated extracted fields must remain unchanged.
+    assert result["customer_name"] == "ACME Corp"
+    assert result["machine_type"] == "Z010"
+
+
+def test_update_source_folder_bumps_updated_at(db, sample_order):
+    storage.upsert_order(db, sample_order)
+    before = storage.get_order(db, "TEST001")["updated_at"]
+    import time; time.sleep(1)
+    storage.update_source_folder(db, "TEST001", r"C:\other\TEST001 ACME")
+    after = storage.get_order(db, "TEST001")["updated_at"]
+    assert after > before
+
+
 def test_update_order_fields_no_valid_keys_is_noop(db, sample_order):
     storage.upsert_order(db, sample_order)
     before = storage.get_order(db, "TEST001")["updated_at"]
     storage.update_order_fields(db, "TEST001", {"bad_key": "x"})
     after = storage.get_order(db, "TEST001")["updated_at"]
     assert after == before  # updated_at not bumped — nothing was written
+
+
+def test_folder_identity_final_folder_name_case_insensitive():
+    a = r"C:\Users\Hirtj\OneDrive\EricProject\DO860728 Acom Labs OPP450766"
+    b = r"C:\Users\MilanE\OneDrive\EricProject\DO860728 ACOM LABS OPP450766"
+    assert storage.folder_identity(a) == storage.folder_identity(b)
+
+
+def test_folder_identity_ignores_trailing_separator():
+    assert storage.folder_identity(r"C:\a\b\Order Folder") == storage.folder_identity(
+        r"C:\a\b\Order Folder\\"
+    )
+
+
+def test_folder_identity_differs_for_different_folder_names():
+    assert storage.folder_identity(r"C:\a\Order A") != storage.folder_identity(r"C:\a\Order B")
 
 
 # ---------------------------------------------------------------------------
@@ -194,3 +245,26 @@ def test_fill_empty_fields_whitespace_treated_as_empty(db, sample_order):
     storage.upsert_order(db, sample_order)
     storage.fill_empty_fields(db, "TEST001", {"industry": "Automotive"})
     assert storage.get_order(db, "TEST001")["industry"] == "Automotive"
+
+
+def test_fill_empty_fields_force_fields_overwrites_populated_column(db, sample_order):
+    storage.upsert_order(db, sample_order)
+    storage.fill_empty_fields(db, "TEST001", {"shipping_date_reason": "No docs yet"})
+    assert storage.get_order(db, "TEST001")["shipping_date_reason"] == "No docs yet"
+
+    # A later refresh with a fresher reason must overwrite the stale one.
+    storage.fill_empty_fields(
+        db, "TEST001",
+        {"shipping_date_reason": "Found on the invoice"},
+        force_fields={"shipping_date_reason"},
+    )
+    assert storage.get_order(db, "TEST001")["shipping_date_reason"] == "Found on the invoice"
+
+
+def test_fill_empty_fields_without_force_fields_keeps_stale_value(db, sample_order):
+    storage.upsert_order(db, sample_order)
+    storage.fill_empty_fields(db, "TEST001", {"shipping_date_reason": "No docs yet"})
+
+    # Without force_fields, a populated column is never overwritten.
+    storage.fill_empty_fields(db, "TEST001", {"shipping_date_reason": "Found on the invoice"})
+    assert storage.get_order(db, "TEST001")["shipping_date_reason"] == "No docs yet"

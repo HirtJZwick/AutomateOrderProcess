@@ -20,17 +20,34 @@ mode — new documents appear, no existing field values are overwritten.
 `scan_root(root)` walks a configured root directory, finds every order folder
 (any folder containing a `Checklist*.docx`), and ingests them all.
 
-This module reuses the existing extraction code and is the ONLY write path the
-web platform uses - the Excel write-back lives separately in `excel_legacy/`.
+`scan_new(root)` does the same walk but only ingests folders whose final
+folder name (e.g. "DO860728 Acom Labs OPP450766") is not already known in the
+database. Order folders live on a shared SharePoint location synchronized via
+OneDrive, so the same order can appear under a different absolute path for
+each user (different OneDrive root). Matching by full path would therefore
+treat an already-ingested order as new; matching by final folder name (case-
+insensitive) correctly recognizes it and instead rebinds the stored
+`source_folder` to the path found in the current scan, so Refresh keeps
+working from that user's machine.
+
+Contacts (logistics coordinator, RSM) and the shipping date are no longer
+extracted locally by an LLM. Instead `power_automate.py` triggers the two
+Power Automate flows that read the order's documents themselves and write
+results to two shared Excel workbooks; `excel_sync.py` then reads those
+workbooks back and merges the results into the order (fill-empty semantics
+via the "fill_empty" merge mode, same as any other field).
+
+This module is the ONLY write path the web platform uses.
 """
 from __future__ import annotations
 
 import glob
 import os
 
+import excel_sync
 import extract_checklist
 import extract_order_pdf
-import llm_extract_phi as llm_extract
+import power_automate
 import storage
 
 # Filename-substring -> document category, for the documents list / completeness.
@@ -105,23 +122,47 @@ def ingest_folder(
             if not data.get(k):
                 data[k] = v
 
-    # Contacts — single LLM call with text from all root PDFs
+    # Contacts — Power Automate flow reads the OC PDFs itself and writes the
+    # result to the shared OC_Contacts.xlsx workbook; we then read it back.
     all_pdfs = extract_order_pdf.find_all_pdfs(folder)
     if all_pdfs:
-        try:
-            data.update(llm_extract.extract_order_contacts(all_pdfs))
-        except Exception as exc:
-            print(f"WARN: contact extraction failed for {folder}: {exc}")
+        if power_automate.trigger_oc_contacts_flow(folder):
+            data.update(excel_sync.lookup_oc_contacts(folder))
+        else:
+            print(f"WARN: OC contacts flow failed for {folder}")
 
-    for shipping_pdf in extract_order_pdf.find_shipping_pdfs(folder):
-        try:
-            result = llm_extract.extract_shipping_date(shipping_pdf)
-        except Exception as exc:
-            print(f"WARN: shipping date extraction failed for {shipping_pdf}: {exc}")
-            continue
-        if result.get("shipping_date"):
-            data.update(result)
-            break
+    # Shipping date — same pattern via the Shipping Date flow + workbook.
+    shipping_pdfs = extract_order_pdf.find_shipping_pdfs(folder)
+    if shipping_pdfs:
+        flow_triggered = power_automate.trigger_shipping_date_flow(data["dossier_no"], folder)
+        if not flow_triggered:
+            print(f"WARN: shipping date flow failed for {folder}")
+
+        # Read the workbook regardless of whether the flow trigger itself
+        # succeeded. After HTTP 200, fall back to the latest row because the
+        # current flow writes the generic shipping-subfolder name instead of
+        # the parent order folder into Folder_Name for no-date results.
+        shipping = excel_sync.lookup_shipping_date(folder)
+        if flow_triggered and not shipping:
+            shipping = excel_sync.lookup_latest_shipping_result()
+        data["shipping_date_reason"] = shipping.get("reasoning")
+        if shipping.get("shipping_date"):
+            data["shipping_date"] = shipping["shipping_date"]
+            print(
+                f"Shipping date FOUND for {folder}: {shipping['shipping_date']} "
+                f"(source: {shipping.get('source_document')}) — reasoning: {shipping.get('reasoning')}"
+            )
+        else:
+            reasons = []
+            if not flow_triggered:
+                reasons.append("the shipping-date flow failed to run")
+            if shipping.get("reasoning"):
+                reasons.append(f"reason: {shipping['reasoning']}")
+            warning = f"No shipping date found for {folder}"
+            if reasons:
+                warning += " — " + "; ".join(reasons)
+            data["shipping_date_warning"] = warning
+            print(warning)
 
     data["source_folder"] = folder
     if "cancelled" in os.path.basename(folder).lower():
@@ -132,7 +173,7 @@ def ingest_folder(
         storage.init_db(conn)
         key = data["dossier_no"]
         if merge == "fill_empty":
-            storage.fill_empty_fields(conn, key, data)
+            storage.fill_empty_fields(conn, key, data, force_fields={"shipping_date_reason"})
         else:
             storage.upsert_order(conn, data)
         storage.replace_documents(conn, key, list_documents(folder))
@@ -156,7 +197,10 @@ def refresh_order(
         db_path:    Path to the SQLite database.
 
     Returns:
-        {"order": <order dict>, "documents": [<doc dicts>]}
+        {"order": <order dict>, "documents": [<doc dicts>],
+         "shipping_date_warning": <str | None>} — the warning is set when a
+        shipping-date lookup ran but found no date (states the reason, if any,
+        so the UI can surface it to the user).
 
     Raises:
         ValueError: if the order is not found, or its source_folder is missing
@@ -176,7 +220,7 @@ def refresh_order(
     finally:
         conn.close()
 
-    ingest_folder(folder, db_path=db_path, merge="fill_empty")
+    ingest_result = ingest_folder(folder, db_path=db_path, merge="fill_empty")
 
     conn = storage.connect(db_path)
     try:
@@ -185,7 +229,11 @@ def refresh_order(
     finally:
         conn.close()
 
-    return {"order": updated_order, "documents": documents}
+    return {
+        "order": updated_order,
+        "documents": documents,
+        "shipping_date_warning": (ingest_result or {}).get("shipping_date_warning"),
+    }
 
 
 def find_order_folders(root: str) -> list[str]:
@@ -197,21 +245,57 @@ def find_order_folders(root: str) -> list[str]:
     return sorted(folders)
 
 
+def _folder_identity(folder: str) -> str:
+    """Normalized identity key for an order folder: final folder name only.
+
+    Thin wrapper delegating to `storage.folder_identity()`, the single shared
+    implementation (also used by `excel_sync.py` to match Excel rows back to
+    a local order folder without needing to import `ingest`).
+    """
+    return storage.folder_identity(folder)
+
+
 def scan_new(root: str, db_path: str = storage.DEFAULT_DB) -> dict:
     """Ingest only order folders not yet present in the database.
 
-    Compares on-disk folders (by path) against the `source_folder` values
-    already stored.  Folders already in the DB are skipped entirely.
+    Compares on-disk folders against known orders by their final folder name
+    (not the full absolute path), since the same shared order folder can be
+    synchronized under a different OneDrive root for each user. Folders whose
+    name already matches a known order are skipped entirely — no checklist,
+    OC, contact, or shipping-date extraction is re-run — but if the matching
+    order's stored `source_folder` points to a different absolute path, it is
+    rebound to the path found in this scan so Refresh keeps working locally.
     """
     conn = storage.connect(db_path)
     try:
         storage.init_db(conn)
-        known = storage.list_source_folders(conn)
+        known = storage.list_dossier_source_folders(conn)
     finally:
         conn.close()
 
+    # Map normalized folder identity -> (dossier_no, current stored path)
+    known_by_identity = {
+        _folder_identity(source_folder): (dossier_no, source_folder)
+        for dossier_no, source_folder in known
+    }
+
     all_folders = find_order_folders(root)
-    new_folders = [f for f in all_folders if f not in known]
+    new_folders = []
+    rebound = []
+    for folder in all_folders:
+        identity = _folder_identity(folder)
+        match = known_by_identity.get(identity)
+        if match is None:
+            new_folders.append(folder)
+            continue
+        dossier_no, stored_folder = match
+        if os.path.normcase(os.path.normpath(stored_folder)) != os.path.normcase(os.path.normpath(folder)):
+            conn = storage.connect(db_path)
+            try:
+                storage.update_source_folder(conn, dossier_no, folder)
+            finally:
+                conn.close()
+            rebound.append(dossier_no)
 
     ingested, skipped = [], []
     aborted = None
@@ -232,6 +316,7 @@ def scan_new(root: str, db_path: str = storage.DEFAULT_DB) -> dict:
         "ingested": ingested,
         "ingested_count": len(ingested),
         "skipped": skipped,
+        "rebound": rebound,
     }
     if aborted:
         result["aborted"] = aborted

@@ -1,11 +1,15 @@
 import StageBand from "./StageBand";
 import CompletenessBar from "./CompletenessBar";
+import InfoIcon from "./InfoIcon";
 import { stageColor } from "../colors";
 
-function Meta({ label, value }) {
+function Meta({ label, value, hint }) {
   return (
     <div className="meta-item">
-      <div className="label">{label}</div>
+      <div className="label">
+        {label}
+        {hint && <InfoIcon text={hint} />}
+      </div>
       <div className="value">{value || "—"}</div>
     </div>
   );
@@ -48,7 +52,11 @@ export default function OrderCard({ order, onOpen }) {
       <div className="card-meta">
         <Meta label="Machine" value={order.machine_type} />
         <Meta label="Industry" value={order.industry} />
-        <Meta label="Shipping date" value={order.shipping_date} />
+        <Meta
+          label="Shipping date"
+          value={order.shipping_date}
+          hint={order.shipping_date_reason}
+        />
         <Meta label="OC received" value={order.received_oc_from_zrx} />
         <Meta label="Customer contact" value={contactName(order.technical_contact) || order.shipping_contact} />
         <Meta label="Sales mgr (RSM)" value={order.rsm} />

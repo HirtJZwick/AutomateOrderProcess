@@ -2,12 +2,16 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import StageBand from "./StageBand";
 import CompletenessBar from "./CompletenessBar";
+import InfoIcon from "./InfoIcon";
 import { stageColor } from "../colors";
 
-function EditField({ label, fieldKey, value, onChange, full, multiline }) {
+function EditField({ label, fieldKey, value, onChange, full, multiline, hint }) {
   return (
     <div className={`field${full ? " full" : ""}`}>
-      <div className="label">{label}</div>
+      <div className="label">
+        {label}
+        {hint && <InfoIcon text={hint} />}
+      </div>
       {multiline ? (
         <textarea
           className="edit-textarea"
@@ -101,7 +105,11 @@ export default function OrderDetail({ dossier, onClose, onOrderUpdated }) {
       const res = await api.refreshOrder(dossier);
       setData(res);
       setEdits({});
-      setActionMessage(`Refreshed — ${res.documents.length} document(s) found.`);
+      if (res.shipping_date_warning) {
+        setActionError(res.shipping_date_warning);
+      } else {
+        setActionMessage(`Refreshed — ${res.documents.length} document(s) found.`);
+      }
       onOrderUpdated?.();
     } catch (e) {
       setActionError(e.message);
@@ -166,7 +174,7 @@ export default function OrderDetail({ dossier, onClose, onOrderUpdated }) {
                 <EditField label="Machine type"       fieldKey="machine_type"        value={fieldValue("machine_type")}        onChange={handleChange} />
                 <EditField label="Industry"           fieldKey="industry"            value={fieldValue("industry")}            onChange={handleChange} />
                 <EditField label="Order date"         fieldKey="order_date"          value={fieldValue("order_date")}          onChange={handleChange} />
-                <EditField label="Shipping date"      fieldKey="shipping_date"       value={fieldValue("shipping_date")}       onChange={handleChange} />
+                <EditField label="Shipping date"      fieldKey="shipping_date"       value={fieldValue("shipping_date")}       onChange={handleChange} hint={o.shipping_date_reason} />
                 <EditField label="PO received on"     fieldKey="po_received_on"      value={fieldValue("po_received_on")}      onChange={handleChange} />
                 <EditField label="Purchase order no." fieldKey="oc_purchase_order_no" value={fieldValue("oc_purchase_order_no")} onChange={handleChange} />
                 <EditField label="Quotation no."      fieldKey="oc_quotation_no"     value={fieldValue("oc_quotation_no")}     onChange={handleChange} />
