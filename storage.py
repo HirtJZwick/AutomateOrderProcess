@@ -84,6 +84,11 @@ COLUMNS = [
     "rsm_phone",
     "rsm_email",
     "source_folder",
+    # Name of the immediate subfolder of the configured root that the order
+    # folder was found in (e.g. "Classic Orders" / "Machine Orders"). Set by
+    # ingest.scan_root / ingest.scan_new; blank for orders ingested before
+    # this field existed, until the next scan rebinds them.
+    "order_group",
     "shipping_date",
     "shipping_date_reason",
     "cancelled",
@@ -238,19 +243,41 @@ def list_dossier_source_folders(conn: sqlite3.Connection) -> list[tuple[str, str
     return [(row[0], row[1]) for row in cur.fetchall()]
 
 
-def update_source_folder(conn: sqlite3.Connection, dossier_no: str, source_folder: str) -> None:
-    """Rebind an existing order's `source_folder` to a new absolute path.
+def update_source_folder(
+    conn: sqlite3.Connection,
+    dossier_no: str,
+    source_folder: str,
+    order_group: str | None = None,
+) -> None:
+    """Rebind an existing order's `source_folder` to a new path.
 
     Used when the same order folder (matched by final folder name) is found
     under a different OneDrive synchronization root than what is currently
-    stored. Only `source_folder` and `updated_at` are touched — no other
-    extracted or manually edited fields are affected.
+    stored. Only `source_folder`, optionally `order_group`, and `updated_at`
+    are touched — no other extracted or manually edited fields are affected.
+
+    `order_group` is passed when the scan knows which root subfolder the order
+    now lives in, so orders that moved between subfolders (or predate the
+    column) get re-tagged. Pass None to leave the stored value untouched.
     """
+    columns = {"source_folder": source_folder}
+    if order_group is not None:
+        columns["order_group"] = order_group
+    set_clause = ", ".join(f'"{k}"=?' for k in columns)
     conn.execute(
-        'UPDATE orders SET "source_folder"=?, "updated_at"=? WHERE "dossier_no"=?',
-        (source_folder, datetime.now(timezone.utc).isoformat(timespec="seconds"), dossier_no),
+        f'UPDATE orders SET {set_clause}, "updated_at"=? WHERE "dossier_no"=?',
+        (*columns.values(), datetime.now(timezone.utc).isoformat(timespec="seconds"), dossier_no),
     )
     conn.commit()
+
+
+def get_order_group(conn: sqlite3.Connection, dossier_no: str) -> str | None:
+    """Return the stored `order_group` for an order, or None when unset."""
+    cur = conn.execute(
+        'SELECT "order_group" FROM orders WHERE "dossier_no"=?', (dossier_no,)
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
 
 
 # ---------------------------------------------------------------------------

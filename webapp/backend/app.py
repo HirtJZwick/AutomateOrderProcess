@@ -72,6 +72,7 @@ _SUMMARY_FIELDS = [
     "shipping_contact",
     "updated_at",
     "cancelled",
+    "order_group",
 ]
 
 

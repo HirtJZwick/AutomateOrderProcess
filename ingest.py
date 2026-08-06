@@ -20,6 +20,12 @@ mode — new documents appear, no existing field values are overwritten.
 `scan_root(root)` walks a configured root directory, finds every order folder
 (any folder containing a `Checklist*.docx`), and ingests them all.
 
+The configured root holds one subfolder per order category (the classic order
+folder and the machine order folder). Both `scan_root` and `scan_new` therefore
+scan every immediate subfolder of the root in turn, and record the subfolder's
+name on each order as `order_group` so the UI can badge and filter by category.
+Order folders sitting directly in the root are not ingested.
+
 `scan_new(root)` does the same walk but only ingests folders whose final
 folder name (e.g. "DO860728 Acom Labs OPP450766") is not already known in the
 database. Order folders live on a shared SharePoint location synchronized via
@@ -105,6 +111,11 @@ def ingest_folder(
                  "fill_empty" — only fills columns that are currently empty/NULL
                  in the DB; manually edited values are never clobbered.
                  Documents are always refreshed regardless of merge mode.
+        order_group: Name of the root subfolder the order was found in (e.g.
+                 "Machine Orders"). Recorded on the order so the UI can badge
+                 and filter by category. Pass None (the default) when the group
+                 is unknown, leaving any stored value untouched in fill_empty
+                 mode.
 
     Returns the extracted data dict, or None if no checklist was found/parsed.
     """
@@ -173,13 +184,49 @@ def ingest_folder(
         storage.init_db(conn)
         key = data["dossier_no"]
         if merge == "fill_empty":
-            storage.fill_empty_fields(conn, key, data, force_fields={"shipping_date_reason"})
+            force = {"shipping_date_reason"}
+            # A folder moved between root subfolders must re-tag even though
+            # the column already holds a (now stale) value.
+            if order_group:
+                force.add("order_group")
+            storage.fill_empty_fields(conn, key, data, force_fields=force)
         else:
             storage.upsert_order(conn, data)
         storage.replace_documents(conn, key, list_documents(folder))
     finally:
         conn.close()
     return data
+
+
+def _relocate_order_folder(stored_folder: str) -> tuple[str, str] | None:
+    """Find `stored_folder` again under the currently configured root.
+
+    The order folders live on a shared SharePoint location synchronized via
+    OneDrive, so the local absolute path changes whenever the library is
+    re-synced under a different root (e.g. moving from a personal OneDrive to a
+    team-site sync root). The stored `source_folder` then points at a path that
+    no longer exists, even though the very same order folder is still on disk.
+
+    Matches on the final folder name (the same identity `scan_new` uses), so a
+    changed root, or a folder moved between order groups, is resolved.
+
+    Returns (new_folder, group) or None when no match is found.
+    """
+    identity = _folder_identity(stored_folder)
+    if not identity:
+        return None
+    try:
+        from webapp.backend.settings import load_config
+
+        root = (load_config().get("root_folder") or "").strip()
+    except Exception:
+        return None
+    if not root:
+        return None
+    for group, folder in find_order_folders_by_group(root):
+        if _folder_identity(folder) == identity:
+            return folder, group
+    return None
 
 
 def refresh_order(
@@ -204,7 +251,7 @@ def refresh_order(
 
     Raises:
         ValueError: if the order is not found, or its source_folder is missing
-                    or no longer present on disk.
+                    and the folder cannot be located under the configured root.
     """
     conn = storage.connect(db_path)
     try:
@@ -212,15 +259,33 @@ def refresh_order(
         order = storage.get_order(conn, dossier_no)
         if order is None:
             raise ValueError(f"Order {dossier_no!r} not found in database.")
-        folder = (order.get("source_folder") or "").strip()
-        if not folder or not os.path.isdir(folder):
-            raise ValueError(
-                f"Order {dossier_no!r} has no valid source_folder on disk: {folder!r}"
+        stored = (order.get("source_folder") or "").strip()
+        order_group = None
+        if not stored:
+            raise ValueError(f"Order {dossier_no!r} has no source_folder recorded.")
+        folder = resolve_source_folder(stored)
+        if not os.path.isdir(folder):
+            relocated = _relocate_order_folder(stored)
+            if relocated is None:
+                raise ValueError(
+                    f"Order {dossier_no!r} has no valid source_folder on disk: "
+                    f"{folder!r}. The folder was not found under the configured "
+                    f"scan folder either — check the scan folder in Settings, "
+                    f"then run 'Scan new orders' to rebind the stored paths."
+                )
+            folder, order_group = relocated
+            storage.update_source_folder(
+                conn, dossier_no, to_stored_folder(folder), order_group=order_group
             )
     finally:
         conn.close()
 
-    ingest_result = ingest_folder(folder, db_path=db_path, merge="fill_empty")
+    ingest_result = ingest_folder(
+        folder,
+        db_path=db_path,
+        merge="fill_empty",
+        order_group=order_group or _configured_order_group(folder),
+    )
 
     conn = storage.connect(db_path)
     try:
@@ -245,6 +310,121 @@ def find_order_folders(root: str) -> list[str]:
     return sorted(folders)
 
 
+def list_order_groups(root: str) -> list[str]:
+    """Sorted names of the immediate subfolders of `root` ("order groups").
+
+    The configured root no longer holds order folders directly: it contains one
+    subfolder per order category (the classic order folder and the machine
+    order folder). Each of those is scanned in turn. Enumerating them instead
+    of hard-coding their names means renaming a folder, or adding a third one,
+    keeps working without a code change.
+
+    Hidden folders and Office lock artifacts ("~$...") are skipped.
+    """
+    if not os.path.isdir(root):
+        return []
+    groups = [
+        name
+        for name in os.listdir(root)
+        if os.path.isdir(os.path.join(root, name))
+        and not name.startswith((".", "~$"))
+    ]
+    return sorted(groups, key=os.path.normcase)
+
+
+def find_order_folders_by_group(root: str) -> list[tuple[str, str]]:
+    """(group, order_folder) pairs for every order folder inside a subfolder.
+
+    Each immediate subfolder of `root` is searched in turn (in the deterministic
+    order given by `list_order_groups`), so the classic order folder is fully
+    scanned before the machine order folder. Order folders sitting directly in
+    `root` are intentionally NOT returned — only orders filed under one of the
+    category subfolders count, so a subfolder that is itself an order folder
+    (its own `Checklist*.docx` at the top level) is skipped.
+
+    The categories can overlap on disk: the SharePoint library exposes the
+    machine order folder both as its own top-level shortcut *and* nested inside
+    the classic order folder. An order reached through another category's folder
+    therefore belongs to that other category, not to the one being walked, and
+    is skipped here so it is counted (and tagged) exactly once.
+    """
+    groups = list_order_groups(root)
+    group_names = {os.path.normcase(name) for name in groups}
+    pairs = []
+    seen = set()
+    for group in groups:
+        group_path = os.path.join(root, group)
+        group_key = os.path.normcase(os.path.normpath(group_path))
+        this_group = os.path.normcase(group)
+        for folder in find_order_folders(group_path):
+            normalized = os.path.normcase(os.path.normpath(folder))
+            if normalized == group_key:
+                continue  # an order folder sitting directly in the root
+            if _under_other_group(folder, group_path, group_names, this_group):
+                continue  # reached through a different category's folder
+            identity = _folder_identity(folder)
+            if identity in seen:
+                continue  # already found under an earlier category
+            seen.add(identity)
+            pairs.append((group, folder))
+    return pairs
+
+
+def _under_other_group(
+    folder: str, group_path: str, group_names: set[str], this_group: str
+) -> bool:
+    """True when `folder` sits inside a directory named after another group.
+
+    Walking `Order_Folders` reaches `Order_Folders/New_Machines_Order_Folder/...`,
+    which really belongs to the machine category. Directories matching the
+    group currently being walked are not treated as foreign, so the library's
+    own `New_Machines_Order_Folder/New_Machines_Order_Folder/...` nesting stays
+    within its category.
+    """
+    try:
+        relative = os.path.relpath(os.path.normpath(folder), os.path.normpath(group_path))
+    except ValueError:  # different drives on Windows
+        return False
+    parts = [os.path.normcase(p) for p in relative.split(os.sep)[:-1]]
+    return any(part in group_names and part != this_group for part in parts)
+
+
+def order_group_for_folder(root: str, folder: str) -> str | None:
+    """The root subfolder `folder` lives under, or None if it is not under `root`.
+
+    Used by `refresh_order` to re-derive an order's group from its stored
+    `source_folder` without re-walking the whole tree.
+    """
+    if not root or not folder:
+        return None
+    try:
+        relative = os.path.relpath(os.path.normpath(folder), os.path.normpath(root))
+    except ValueError:  # different drives on Windows
+        return None
+    parts = relative.split(os.sep)
+    if not parts or parts[0] in ("", os.curdir, os.pardir):
+        return None
+    return parts[0]
+
+
+def _configured_order_group(folder: str) -> str | None:
+    """`order_group_for_folder()` against the configured root_folder.
+
+    Returns None when no root is configured, config cannot be read, or the
+    folder is not under the root — in which case the caller leaves the stored
+    group untouched rather than clearing it.
+    """
+    try:
+        from webapp.backend.settings import load_config
+
+        root = (load_config().get("root_folder") or "").strip()
+    except Exception:
+        return None
+    if not root:
+        return None
+    return order_group_for_folder(root, folder)
+
+
 def _folder_identity(folder: str) -> str:
     """Normalized identity key for an order folder: final folder name only.
 
@@ -258,18 +438,27 @@ def _folder_identity(folder: str) -> str:
 def scan_new(root: str, db_path: str = storage.DEFAULT_DB) -> dict:
     """Ingest only order folders not yet present in the database.
 
+    Every immediate subfolder of `root` (the classic order folder, the machine
+    order folder, ...) is scanned in turn — see `find_order_folders_by_group()`.
+
     Compares on-disk folders against known orders by their final folder name
     (not the full absolute path), since the same shared order folder can be
     synchronized under a different OneDrive root for each user. Folders whose
     name already matches a known order are skipped entirely — no checklist,
     OC, contact, or shipping-date extraction is re-run — but if the matching
-    order's stored `source_folder` points to a different absolute path, it is
-    rebound to the path found in this scan so Refresh keeps working locally.
+    order's stored `source_folder` points to a different absolute path, or its
+    stored `order_group` no longer matches the subfolder it was found in, those
+    are rebound to what this scan found so Refresh keeps working locally and the
+    category stays accurate.
     """
     conn = storage.connect(db_path)
     try:
         storage.init_db(conn)
         known = storage.list_dossier_source_folders(conn)
+        known_groups = {
+            dossier_no: storage.get_order_group(conn, dossier_no)
+            for dossier_no, _ in known
+        }
     finally:
         conn.close()
 
@@ -279,29 +468,34 @@ def scan_new(root: str, db_path: str = storage.DEFAULT_DB) -> dict:
         for dossier_no, source_folder in known
     }
 
-    all_folders = find_order_folders(root)
+    group_folders = find_order_folders_by_group(root)
     new_folders = []
     rebound = []
-    for folder in all_folders:
+    for group, folder in group_folders:
         identity = _folder_identity(folder)
         match = known_by_identity.get(identity)
         if match is None:
-            new_folders.append(folder)
+            new_folders.append((group, folder))
             continue
         dossier_no, stored_folder = match
-        if os.path.normcase(os.path.normpath(stored_folder)) != os.path.normcase(os.path.normpath(folder)):
+        new_stored = to_stored_folder(folder)
+        path_changed = os.path.normcase(os.path.normpath(stored_folder)) != os.path.normcase(
+            os.path.normpath(new_stored)
+        )
+        group_changed = (known_groups.get(dossier_no) or "") != group
+        if path_changed or group_changed:
             conn = storage.connect(db_path)
             try:
-                storage.update_source_folder(conn, dossier_no, folder)
+                storage.update_source_folder(conn, dossier_no, new_stored, order_group=group)
             finally:
                 conn.close()
             rebound.append(dossier_no)
 
     ingested, skipped = [], []
     aborted = None
-    for folder in new_folders:
+    for group, folder in new_folders:
         try:
-            order = ingest_folder(folder, db_path=db_path)
+            order = ingest_folder(folder, db_path=db_path, order_group=group)
             if order:
                 ingested.append(order.get("dossier_no"))
             else:
@@ -311,7 +505,8 @@ def scan_new(root: str, db_path: str = storage.DEFAULT_DB) -> dict:
             break  # stop — no requests left
     result = {
         "root": root,
-        "folders_found": len(all_folders),
+        "groups": sorted({group for group, _ in group_folders}, key=os.path.normcase),
+        "folders_found": len(group_folders),
         "new_folders_found": len(new_folders),
         "ingested": ingested,
         "ingested_count": len(ingested),
@@ -324,13 +519,17 @@ def scan_new(root: str, db_path: str = storage.DEFAULT_DB) -> dict:
 
 
 def scan_root(root: str, db_path: str = storage.DEFAULT_DB) -> dict:
-    """Ingest every order folder under `root`. Returns a summary dict."""
-    folders = find_order_folders(root)
+    """Ingest every order folder under `root`. Returns a summary dict.
+
+    Each immediate subfolder of `root` (classic orders, machine orders, ...) is
+    scanned in turn; order folders sitting directly in `root` are ignored.
+    """
+    group_folders = find_order_folders_by_group(root)
     ingested, skipped = [], []
     aborted = None
-    for folder in folders:
+    for group, folder in group_folders:
         try:
-            order = ingest_folder(folder, db_path=db_path)
+            order = ingest_folder(folder, db_path=db_path, order_group=group)
             if order:
                 ingested.append(order.get("dossier_no"))
             else:
@@ -340,7 +539,8 @@ def scan_root(root: str, db_path: str = storage.DEFAULT_DB) -> dict:
             break  # stop — no requests left
     result = {
         "root": root,
-        "folders_found": len(folders),
+        "groups": sorted({group for group, _ in group_folders}, key=os.path.normcase),
+        "folders_found": len(group_folders),
         "ingested": ingested,
         "ingested_count": len(ingested),
         "skipped": skipped,

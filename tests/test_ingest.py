@@ -1,7 +1,49 @@
+import os
+
 import pytest
 import ingest
 import extract_order_pdf
 import storage
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config_from_machine(monkeypatch):
+    """Keep root-folder lookups off this machine's real config.json.
+
+    `_configured_order_group()` and `_relocate_order_folder()` both read the
+    live config; without this the tests would walk the real order tree.
+    Tests that need a root install their own `load_config` stub.
+
+    Flow-result polling is also collapsed to a single attempt so tests never
+    sit through the real wait for a workbook row to sync down.
+    """
+    import webapp.backend.settings as settings
+    import excel_sync
+
+    monkeypatch.setattr(settings, "load_config", lambda: {})
+    monkeypatch.setattr(excel_sync, "_flow_result_timeout", lambda: 0.0)
+
+
+def _patch_workbook_freshness(monkeypatch):
+    """Make the shipping workbook look modified after the flow was triggered.
+
+    `ingest_folder` reads the mtime once before triggering; every later read
+    must come back newer so the generic-row fallback is allowed.
+    """
+    calls = {"n": 0}
+
+    def _mtime(path=None):
+        calls["n"] += 1
+        return 0.0 if calls["n"] == 1 else 1.0
+
+    monkeypatch.setattr("excel_sync.workbook_mtime", _mtime)
+
+
+def _patch_config_root(monkeypatch, root):
+    """Point the config-backed root_folder lookups at `root`."""
+    import webapp.backend.settings as settings
+
+    monkeypatch.setattr(settings, "load_config", lambda: {"root_folder": str(root)})
 
 
 # ── find_all_pdfs ──────────────────────────────────────────────────────────────
@@ -655,6 +697,94 @@ def test_refresh_order_raises_for_missing_folder(tmp_path, monkeypatch):
         ingest.refresh_order("DO010", db_path=db_path)
 
 
+def test_refresh_order_relocates_folder_after_root_change(tmp_path, monkeypatch):
+    """The synced root moved: refresh finds the folder again and rebinds it."""
+    old_root = tmp_path / "OldRoot"
+    old_folder = old_root / "Order_Folders" / "DO011 Henkel"
+    old_folder.mkdir(parents=True)
+    (old_folder / "Checklist DO011.docx").write_bytes(b"")
+    db_path = str(tmp_path / "test.db")
+
+    _patch_config_root(monkeypatch, old_root)
+    _patch_extraction(monkeypatch, old_folder, {"dossier_no": "DO011", "customer_name": "Henkel"})
+    ingest.scan_new(str(old_root), db_path=db_path)
+
+    # The library re-syncs under a brand new root; the old one disappears.
+    new_root = tmp_path / "NewRoot"
+    new_folder = new_root / "Order_Folders" / "DO011 Henkel"
+    new_folder.mkdir(parents=True)
+    (new_folder / "Checklist DO011.docx").write_bytes(b"")
+    import shutil
+    shutil.rmtree(str(old_root))
+
+    _patch_config_root(monkeypatch, new_root)
+    _patch_extraction(monkeypatch, new_folder, {"dossier_no": "DO011", "industry": "Chemicals"})
+    result = ingest.refresh_order("DO011", db_path=db_path)
+
+    assert result["order"]["source_folder"] == "Order_Folders/DO011 Henkel"
+    assert result["order"]["order_group"] == "Order_Folders"
+    assert result["order"]["industry"] == "Chemicals"
+
+
+def test_refresh_order_relocation_survives_group_change(tmp_path, monkeypatch):
+    """A folder moved to the other category is found and re-tagged."""
+    root = tmp_path / "Root"
+    classic = root / "Order_Folders" / "DO012 ACME"
+    classic.mkdir(parents=True)
+    (classic / "Checklist DO012.docx").write_bytes(b"")
+    db_path = str(tmp_path / "test.db")
+
+    _patch_config_root(monkeypatch, root)
+    _patch_extraction(monkeypatch, classic, {"dossier_no": "DO012", "customer_name": "ACME"})
+    ingest.scan_new(str(root), db_path=db_path)
+
+    machine = root / "New_Machines_Order_Folder" / "DO012 ACME"
+    machine.parent.mkdir(parents=True)
+    import shutil
+    shutil.move(str(classic), str(machine))
+
+    _patch_extraction(monkeypatch, machine, {"dossier_no": "DO012"})
+    result = ingest.refresh_order("DO012", db_path=db_path)
+
+    assert result["order"]["source_folder"] == "New_Machines_Order_Folder/DO012 ACME"
+    assert result["order"]["order_group"] == "New_Machines_Order_Folder"
+
+
+def test_refresh_order_error_names_the_scan_folder_remedy(tmp_path, monkeypatch):
+    """When relocation fails the message tells the user what to do."""
+    root = tmp_path / "Root"
+    folder = root / "Order_Folders" / "DO013 Gone"
+    folder.mkdir(parents=True)
+    (folder / "Checklist DO013.docx").write_bytes(b"")
+    db_path = str(tmp_path / "test.db")
+
+    _patch_config_root(monkeypatch, root)
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO013", "customer_name": "Gone"})
+    ingest.scan_new(str(root), db_path=db_path)
+
+    import shutil
+    shutil.rmtree(str(folder))
+
+    with pytest.raises(ValueError, match="Scan new orders"):
+        ingest.refresh_order("DO013", db_path=db_path)
+
+
+def test_relocate_order_folder_returns_none_without_configured_root(tmp_path):
+    assert ingest._relocate_order_folder(str(tmp_path / "DO999 Nobody")) is None
+
+
+def test_relocate_order_folder_matches_by_folder_name(tmp_path, monkeypatch):
+    root = tmp_path / "Root"
+    folder = root / "Order_Folders" / "DO014 Indomo"
+    folder.mkdir(parents=True)
+    (folder / "Checklist DO014.docx").write_bytes(b"")
+
+    _patch_config_root(monkeypatch, root)
+    found = ingest._relocate_order_folder(r"D:\Some\Old\Root\Order_Folders\DO014 Indomo")
+
+    assert found == (str(folder), "Order_Folders")
+
+
 # ── scan_new: folder-name identity across different OneDrive roots ──────────
 
 def test_scan_new_skips_known_order_with_different_root_path(tmp_path, monkeypatch):
@@ -662,9 +792,8 @@ def test_scan_new_skips_known_order_with_different_root_path(tmp_path, monkeypat
     recognized as already known, not re-ingested."""
     # Simulate Milan's OneDrive root, already ingested.
     milan_root = tmp_path / "MilanE" / "OneDrive" / "EricProject"
-    milan_root.mkdir(parents=True)
-    milan_folder = milan_root / "DO860728 Acom Labs OPP450766"
-    milan_folder.mkdir()
+    milan_folder = milan_root / "Classic Orders" / "DO860728 Acom Labs OPP450766"
+    milan_folder.mkdir(parents=True)
     (milan_folder / "Checklist DO860728.docx").write_bytes(b"")
 
     db_path = str(tmp_path / "test.db")
@@ -673,9 +802,8 @@ def test_scan_new_skips_known_order_with_different_root_path(tmp_path, monkeypat
 
     # Now simulate Eric's OneDrive root with the SAME final folder name.
     eric_root = tmp_path / "Hirtj" / "OneDrive" / "EricProject"
-    eric_root.mkdir(parents=True)
-    eric_folder = eric_root / "DO860728 Acom Labs OPP450766"
-    eric_folder.mkdir()
+    eric_folder = eric_root / "Classic Orders" / "DO860728 Acom Labs OPP450766"
+    eric_folder.mkdir(parents=True)
     (eric_folder / "Checklist DO860728.docx").write_bytes(b"")
 
     def _fail_if_called(folder, **kwargs):
@@ -685,6 +813,7 @@ def test_scan_new_skips_known_order_with_different_root_path(tmp_path, monkeypat
 
     result = ingest.scan_new(str(eric_root), db_path=db_path)
 
+    assert result["folders_found"] == 1
     assert result["new_folders_found"] == 0
     assert result["ingested_count"] == 0
 
@@ -693,9 +822,8 @@ def test_scan_new_rebinds_source_folder_to_current_path(tmp_path, monkeypatch):
     """When the matching order is found at a different absolute path, the
     stored source_folder must be updated to the currently scanned path."""
     milan_root = tmp_path / "MilanE" / "OneDrive" / "EricProject"
-    milan_root.mkdir(parents=True)
-    milan_folder = milan_root / "DO860728 Acom Labs OPP450766"
-    milan_folder.mkdir()
+    milan_folder = milan_root / "Classic Orders" / "DO860728 Acom Labs OPP450766"
+    milan_folder.mkdir(parents=True)
     (milan_folder / "Checklist DO860728.docx").write_bytes(b"")
 
     db_path = str(tmp_path / "test.db")
@@ -703,9 +831,8 @@ def test_scan_new_rebinds_source_folder_to_current_path(tmp_path, monkeypatch):
     ingest.ingest_folder(str(milan_folder), db_path=db_path)
 
     eric_root = tmp_path / "Hirtj" / "OneDrive" / "EricProject"
-    eric_root.mkdir(parents=True)
-    eric_folder = eric_root / "DO860728 Acom Labs OPP450766"
-    eric_folder.mkdir()
+    eric_folder = eric_root / "Classic Orders" / "DO860728 Acom Labs OPP450766"
+    eric_folder.mkdir(parents=True)
     (eric_folder / "Checklist DO860728.docx").write_bytes(b"")
 
     ingest.scan_new(str(eric_root), db_path=db_path)
@@ -720,9 +847,8 @@ def test_scan_new_rebinds_source_folder_to_current_path(tmp_path, monkeypatch):
 def test_scan_new_rebind_lets_refresh_work_from_new_path(tmp_path, monkeypatch):
     """After rebinding, refresh_order must succeed using the new local path."""
     milan_root = tmp_path / "MilanE" / "OneDrive" / "EricProject"
-    milan_root.mkdir(parents=True)
-    milan_folder = milan_root / "DO860728 Acom Labs OPP450766"
-    milan_folder.mkdir()
+    milan_folder = milan_root / "Classic Orders" / "DO860728 Acom Labs OPP450766"
+    milan_folder.mkdir(parents=True)
     (milan_folder / "Checklist DO860728.docx").write_bytes(b"")
 
     db_path = str(tmp_path / "test.db")
@@ -730,9 +856,8 @@ def test_scan_new_rebind_lets_refresh_work_from_new_path(tmp_path, monkeypatch):
     ingest.ingest_folder(str(milan_folder), db_path=db_path)
 
     eric_root = tmp_path / "Hirtj" / "OneDrive" / "EricProject"
-    eric_root.mkdir(parents=True)
-    eric_folder = eric_root / "DO860728 Acom Labs OPP450766"
-    eric_folder.mkdir()
+    eric_folder = eric_root / "Classic Orders" / "DO860728 Acom Labs OPP450766"
+    eric_folder.mkdir(parents=True)
     (eric_folder / "Checklist DO860728.docx").write_bytes(b"")
 
     ingest.scan_new(str(eric_root), db_path=db_path)
@@ -749,9 +874,8 @@ def test_scan_new_rebind_lets_refresh_work_from_new_path(tmp_path, monkeypatch):
 
 def test_scan_new_still_ingests_genuinely_new_folder_name(tmp_path, monkeypatch):
     root = tmp_path / "EricProject"
-    root.mkdir()
-    folder = root / "DO999999 New Customer"
-    folder.mkdir()
+    folder = root / "Classic Orders" / "DO999999 New Customer"
+    folder.mkdir(parents=True)
     (folder / "Checklist DO999999.docx").write_bytes(b"")
 
     db_path = str(tmp_path / "test.db")
@@ -765,9 +889,8 @@ def test_scan_new_still_ingests_genuinely_new_folder_name(tmp_path, monkeypatch)
 
 def test_scan_new_folder_name_matching_is_case_insensitive(tmp_path, monkeypatch):
     milan_root = tmp_path / "MilanE" / "EricProject"
-    milan_root.mkdir(parents=True)
-    milan_folder = milan_root / "do860728 acom labs opp450766"
-    milan_folder.mkdir()
+    milan_folder = milan_root / "Classic Orders" / "do860728 acom labs opp450766"
+    milan_folder.mkdir(parents=True)
     (milan_folder / "Checklist DO860728.docx").write_bytes(b"")
 
     db_path = str(tmp_path / "test.db")
@@ -775,16 +898,303 @@ def test_scan_new_folder_name_matching_is_case_insensitive(tmp_path, monkeypatch
     ingest.ingest_folder(str(milan_folder), db_path=db_path)
 
     eric_root = tmp_path / "Hirtj" / "EricProject"
-    eric_root.mkdir(parents=True)
-    eric_folder = eric_root / "DO860728 ACOM LABS OPP450766"
-    eric_folder.mkdir()
+    eric_folder = eric_root / "Classic Orders" / "DO860728 ACOM LABS OPP450766"
+    eric_folder.mkdir(parents=True)
     (eric_folder / "Checklist DO860728.docx").write_bytes(b"")
 
     result = ingest.scan_new(str(eric_root), db_path=db_path)
 
+    assert result["folders_found"] == 1
     assert result["new_folders_found"] == 0
     assert result["ingested_count"] == 0
 
 
 def test_folder_identity_ignores_trailing_separator():
     assert ingest._folder_identity(r"C:\root\DO001 ACME" + "\\") == ingest._folder_identity(r"C:\root\DO001 ACME")
+
+
+# ── two order subfolders under the root (classic + machine orders) ───────────
+
+def _make_two_group_root(tmp_path):
+    """Root holding a classic and a machine order subfolder, one order each."""
+    root = tmp_path / "EricProject"
+    classic = root / "Classic Orders" / "DO001 ACME"
+    machine = root / "Machine Orders" / "DO002 Globex"
+    classic.mkdir(parents=True)
+    machine.mkdir(parents=True)
+    (classic / "Checklist DO001.docx").write_bytes(b"")
+    (machine / "Checklist DO002.docx").write_bytes(b"")
+    return root, classic, machine
+
+
+def test_list_order_groups_returns_immediate_subfolders_sorted(tmp_path):
+    root, _, _ = _make_two_group_root(tmp_path)
+    assert ingest.list_order_groups(str(root)) == ["Classic Orders", "Machine Orders"]
+
+
+def test_list_order_groups_skips_files_and_hidden_folders(tmp_path):
+    root = tmp_path / "EricProject"
+    (root / "Machine Orders").mkdir(parents=True)
+    (root / ".hidden").mkdir()
+    (root / "~$lock").mkdir()
+    (root / "notes.txt").write_text("x", encoding="utf-8")
+    assert ingest.list_order_groups(str(root)) == ["Machine Orders"]
+
+
+def test_list_order_groups_missing_root_returns_empty(tmp_path):
+    assert ingest.list_order_groups(str(tmp_path / "nope")) == []
+
+
+def test_find_order_folders_by_group_covers_both_subfolders(tmp_path):
+    root, classic, machine = _make_two_group_root(tmp_path)
+    pairs = ingest.find_order_folders_by_group(str(root))
+    assert pairs == [
+        ("Classic Orders", str(classic)),
+        ("Machine Orders", str(machine)),
+    ]
+
+
+def test_find_order_folders_by_group_ignores_order_folder_in_root(tmp_path):
+    """An order folder sitting directly in the root is not an order group."""
+    root, classic, _ = _make_two_group_root(tmp_path)
+    loose = root / "DO900 Loose Order"
+    loose.mkdir()
+    (loose / "Checklist DO900.docx").write_bytes(b"")
+
+    folders = [folder for _, folder in ingest.find_order_folders_by_group(str(root))]
+    assert str(loose) not in folders
+    assert str(classic) in folders
+
+
+def test_find_order_folders_by_group_handles_nested_order_folders(tmp_path):
+    """A deeper structure inside a subfolder still reports the top subfolder."""
+    root = tmp_path / "EricProject"
+    nested = root / "Machine Orders" / "2026" / "DO003 Initech"
+    nested.mkdir(parents=True)
+    (nested / "Checklist DO003.docx").write_bytes(b"")
+    assert ingest.find_order_folders_by_group(str(root)) == [("Machine Orders", str(nested))]
+
+
+def test_scan_root_ingests_orders_from_both_subfolders(tmp_path, monkeypatch):
+    root, classic, machine = _make_two_group_root(tmp_path)
+    db_path = str(tmp_path / "test.db")
+
+    _patch_extraction(monkeypatch, classic, {})
+    monkeypatch.setattr(
+        "extract_checklist.extract",
+        lambda p: {"dossier_no": "DO001"} if "Classic" in str(p) else {"dossier_no": "DO002"},
+    )
+    monkeypatch.setattr("extract_checklist.find_checklist", lambda f: os.path.join(f, "Checklist.docx"))
+
+    result = ingest.scan_root(str(root), db_path=db_path)
+
+    assert result["folders_found"] == 2
+    assert sorted(result["ingested"]) == ["DO001", "DO002"]
+    assert result["groups"] == ["Classic Orders", "Machine Orders"]
+
+
+def test_scan_root_records_order_group_per_order(tmp_path, monkeypatch):
+    root, classic, machine = _make_two_group_root(tmp_path)
+    db_path = str(tmp_path / "test.db")
+
+    _patch_extraction(monkeypatch, classic, {})
+    monkeypatch.setattr(
+        "extract_checklist.extract",
+        lambda p: {"dossier_no": "DO001"} if "Classic" in str(p) else {"dossier_no": "DO002"},
+    )
+    monkeypatch.setattr("extract_checklist.find_checklist", lambda f: os.path.join(f, "Checklist.docx"))
+
+    ingest.scan_root(str(root), db_path=db_path)
+
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    assert storage.get_order(conn, "DO001")["order_group"] == "Classic Orders"
+    assert storage.get_order(conn, "DO002")["order_group"] == "Machine Orders"
+    conn.close()
+
+
+def test_scan_new_ingests_new_order_from_machine_subfolder(tmp_path, monkeypatch):
+    """A new order added to the machine subfolder is picked up while the
+    already-known classic order is skipped."""
+    root, classic, machine = _make_two_group_root(tmp_path)
+    db_path = str(tmp_path / "test.db")
+
+    _patch_extraction(monkeypatch, classic, {"dossier_no": "DO001", "customer_name": "ACME"})
+    ingest.ingest_folder(str(classic), db_path=db_path, order_group="Classic Orders")
+
+    _patch_extraction(monkeypatch, machine, {"dossier_no": "DO002", "customer_name": "Globex"})
+    monkeypatch.setattr("extract_checklist.find_checklist", lambda f: os.path.join(f, "Checklist.docx"))
+
+    result = ingest.scan_new(str(root), db_path=db_path)
+
+    assert result["folders_found"] == 2
+    assert result["new_folders_found"] == 1
+    assert result["ingested"] == ["DO002"]
+
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    assert storage.get_order(conn, "DO002")["order_group"] == "Machine Orders"
+    conn.close()
+
+
+def test_scan_new_backfills_order_group_for_previously_ingested_order(tmp_path, monkeypatch):
+    """Orders ingested before the order_group column existed get tagged on the
+    next scan without being re-ingested."""
+    root = tmp_path / "EricProject"
+    classic = root / "Classic Orders" / "DO001 ACME"
+    classic.mkdir(parents=True)
+    (classic / "Checklist DO001.docx").write_bytes(b"")
+    db_path = str(tmp_path / "test.db")
+
+    _patch_extraction(monkeypatch, classic, {"dossier_no": "DO001", "customer_name": "ACME"})
+    ingest.ingest_folder(str(classic), db_path=db_path)  # no order_group
+
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    assert storage.get_order(conn, "DO001")["order_group"] in (None, "")
+    conn.close()
+
+    monkeypatch.setattr(
+        ingest,
+        "ingest_folder",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not re-ingest")),
+    )
+    result = ingest.scan_new(str(root), db_path=db_path)
+
+    assert "DO001" in result["rebound"]
+    conn = storage.connect(db_path)
+    assert storage.get_order(conn, "DO001")["order_group"] == "Classic Orders"
+    conn.close()
+
+
+def test_scan_new_retags_order_moved_between_subfolders(tmp_path, monkeypatch):
+    """An order moved from the classic to the machine subfolder is re-tagged,
+    not re-ingested."""
+    root = tmp_path / "EricProject"
+    classic = root / "Classic Orders" / "DO001 ACME"
+    classic.mkdir(parents=True)
+    (classic / "Checklist DO001.docx").write_bytes(b"")
+
+    db_path = str(tmp_path / "test.db")
+    _patch_extraction(monkeypatch, classic, {"dossier_no": "DO001", "customer_name": "ACME"})
+    ingest.scan_new(str(root), db_path=db_path)
+
+    # Move the order folder into the machine subfolder.
+    import shutil
+    machine = root / "Machine Orders" / "DO001 ACME"
+    machine.parent.mkdir(parents=True)
+    shutil.move(str(classic), str(machine))
+    shutil.rmtree(str(root / "Classic Orders"))
+
+    monkeypatch.setattr(
+        ingest,
+        "ingest_folder",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not re-ingest")),
+    )
+    result = ingest.scan_new(str(root), db_path=db_path)
+
+    assert result["ingested_count"] == 0
+    assert "DO001" in result["rebound"]
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    order = storage.get_order(conn, "DO001")
+    conn.close()
+    assert order["order_group"] == "Machine Orders"
+    assert order["source_folder"] == str(machine)
+
+
+def test_refresh_order_keeps_existing_order_group(tmp_path, monkeypatch):
+    root = tmp_path / "EricProject"
+    classic = root / "Classic Orders" / "DO001 ACME"
+    classic.mkdir(parents=True)
+    (classic / "Checklist DO001.docx").write_bytes(b"")
+    db_path = str(tmp_path / "test.db")
+
+    _patch_extraction(monkeypatch, classic, {"dossier_no": "DO001", "customer_name": "ACME"})
+    ingest.scan_new(str(root), db_path=db_path)
+
+    _patch_extraction(monkeypatch, classic, {"dossier_no": "DO001", "industry": "Automotive"})
+    result = ingest.refresh_order("DO001", db_path=db_path)
+
+    assert result["order"]["order_group"] == "Classic Orders"
+    assert result["order"]["industry"] == "Automotive"
+
+
+def _make_overlapping_group_root(tmp_path):
+    """Root where the machine folder also appears nested in the classic one.
+
+    Mirrors the real SharePoint library: `New_Machines_Order_Folder` is exposed
+    as its own top-level shortcut *and* lives inside `Order_Folders`.
+    """
+    root = tmp_path / "EricProject"
+    classic = root / "Order_Folders" / "DO100 ACME"
+    machine = root / "New_Machines_Order_Folder" / "New_Machines_Order_Folder" / "DO200 Globex"
+    nested = root / "Order_Folders" / "New_Machines_Order_Folder" / "DO200 Globex"
+    for folder in (classic, machine, nested):
+        folder.mkdir(parents=True)
+        (folder / "Checklist.docx").write_bytes(b"")
+    return root, classic, machine, nested
+
+
+def test_find_order_folders_by_group_skips_nested_other_group(tmp_path):
+    root, classic, machine, nested = _make_overlapping_group_root(tmp_path)
+    pairs = ingest.find_order_folders_by_group(str(root))
+
+    assert (str(nested)) not in [folder for _, folder in pairs]
+    assert ("New_Machines_Order_Folder", str(machine)) in pairs
+    assert ("Order_Folders", str(classic)) in pairs
+    assert len(pairs) == 2
+
+
+def test_find_order_folders_by_group_allows_same_name_nesting(tmp_path):
+    """The machine folder nested inside itself still counts as machine orders."""
+    root, _, machine, _ = _make_overlapping_group_root(tmp_path)
+    pairs = dict((folder, group) for group, folder in ingest.find_order_folders_by_group(str(root)))
+    assert pairs[str(machine)] == "New_Machines_Order_Folder"
+
+
+def test_find_order_folders_by_group_reports_each_order_once(tmp_path):
+    root, _, _, _ = _make_overlapping_group_root(tmp_path)
+    folders = [folder for _, folder in ingest.find_order_folders_by_group(str(root))]
+    identities = [storage.folder_identity(f) for f in folders]
+    assert len(identities) == len(set(identities))
+
+
+def test_scan_new_tags_overlapping_machine_orders_to_machine_group(tmp_path, monkeypatch):
+    root, _, machine, _ = _make_overlapping_group_root(tmp_path)
+    db_path = str(tmp_path / "test.db")
+
+    monkeypatch.setattr(
+        "extract_checklist.find_checklist", lambda f: os.path.join(f, "Checklist.docx")
+    )
+    monkeypatch.setattr(
+        "extract_checklist.extract",
+        lambda p: {"dossier_no": os.path.basename(os.path.dirname(p)).split()[0]},
+    )
+    monkeypatch.setattr("extract_order_pdf.find_all_pdfs", lambda f: [])
+    monkeypatch.setattr("extract_order_pdf.find_order_pdf", lambda f: None)
+    monkeypatch.setattr("extract_order_pdf.find_shipping_pdfs", lambda f: [])
+
+    result = ingest.scan_new(str(root), db_path=db_path)
+
+    assert result["folders_found"] == 2
+    conn = storage.connect(db_path)
+    try:
+        assert storage.get_order_group(conn, "DO200") == "New_Machines_Order_Folder"
+        assert storage.get_order(conn, "DO200")["source_folder"] == str(machine)
+        assert storage.get_order_group(conn, "DO100") == "Order_Folders"
+    finally:
+        conn.close()
+
+
+def test_order_group_for_folder_derives_top_subfolder(tmp_path):
+    root, _, machine = _make_two_group_root(tmp_path)
+    assert ingest.order_group_for_folder(str(root), str(machine)) == "Machine Orders"
+
+
+def test_order_group_for_folder_returns_none_outside_root(tmp_path):
+    root, _, _ = _make_two_group_root(tmp_path)
+    outside = tmp_path / "Elsewhere" / "DO500"
+    assert ingest.order_group_for_folder(str(root), str(outside)) is None
+    assert ingest.order_group_for_folder(str(root), str(root)) is None
+    assert ingest.order_group_for_folder("", str(root)) is None

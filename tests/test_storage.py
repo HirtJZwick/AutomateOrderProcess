@@ -268,3 +268,51 @@ def test_fill_empty_fields_without_force_fields_keeps_stale_value(db, sample_ord
     # Without force_fields, a populated column is never overwritten.
     storage.fill_empty_fields(db, "TEST001", {"shipping_date_reason": "Found on the invoice"})
     assert storage.get_order(db, "TEST001")["shipping_date_reason"] == "No docs yet"
+
+
+# -- order_group column ------------------------------------------------------
+
+def test_order_group_is_persisted_and_read_back(db):
+    storage.upsert_order(db, {"dossier_no": "G001", "order_group": "Machine Orders"})
+    assert storage.get_order(db, "G001")["order_group"] == "Machine Orders"
+    assert storage.get_order_group(db, "G001") == "Machine Orders"
+
+
+def test_get_order_group_returns_none_for_missing_order(db):
+    assert storage.get_order_group(db, "NOPE") is None
+
+
+def test_update_source_folder_sets_order_group(db):
+    storage.upsert_order(db, {"dossier_no": "G002", "source_folder": r"C:\old\DO1"})
+    storage.update_source_folder(db, "G002", r"C:\new\DO1", order_group="Machine Orders")
+    order = storage.get_order(db, "G002")
+    assert order["source_folder"] == r"C:\new\DO1"
+    assert order["order_group"] == "Machine Orders"
+
+
+def test_update_source_folder_without_group_keeps_existing_group(db):
+    storage.upsert_order(db, {"dossier_no": "G003", "order_group": "Classic Orders"})
+    storage.update_source_folder(db, "G003", r"C:\new\DO3")
+    assert storage.get_order(db, "G003")["order_group"] == "Classic Orders"
+
+
+def test_init_db_migrates_table_missing_order_group(tmp_path):
+    """A database created before the order_group column must migrate cleanly."""
+    import sqlite3
+
+    db_path = str(tmp_path / "legacy.db")
+    legacy = sqlite3.connect(db_path)
+    legacy.execute(
+        'CREATE TABLE orders ("dossier_no" TEXT PRIMARY KEY, "customer_name" TEXT, "updated_at" TEXT)'
+    )
+    legacy.execute('INSERT INTO orders VALUES ("LEGACY1", "Old Corp", "2026-01-01T00:00:00")')
+    legacy.commit()
+    legacy.close()
+
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    order = storage.get_order(conn, "LEGACY1")
+    conn.close()
+
+    assert order["customer_name"] == "Old Corp"
+    assert order["order_group"] is None

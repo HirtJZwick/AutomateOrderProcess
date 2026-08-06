@@ -259,3 +259,31 @@ def test_refresh_order_missing_folder_returns_400(api_client, test_db_path):
 
     res = api_client.post("/api/orders/DO021/refresh")
     assert res.status_code == 400
+
+
+def test_order_group_exposed_on_list_and_detail(api_client, test_db_path):
+    conn = storage.connect(test_db_path)
+    storage.upsert_order(conn, {"dossier_no": "D100", "order_group": "Machine Orders"})
+    conn.close()
+
+    list_res = api_client.get("/api/orders")
+    assert list_res.status_code == 200
+    assert list_res.json()["orders"][0]["order_group"] == "Machine Orders"
+
+    detail_res = api_client.get("/api/orders/D100")
+    assert detail_res.status_code == 200
+    assert detail_res.json()["order"]["order_group"] == "Machine Orders"
+
+
+def test_scan_summary_includes_groups(api_client):
+    res = api_client.post("/api/scan")
+    assert res.status_code == 200
+    assert res.json()["groups"] == []
+
+
+def test_scan_new_summary_includes_groups(api_client):
+    res = api_client.post("/api/scan/new")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["groups"] == []
+    assert body["folders_found"] == 0
