@@ -1,0 +1,16 @@
+# Runtime dependencies for the ZwickRoell Order Tracker.
+#
+# Versions are pinned to the set this application was developed and tested
+# against, so a fresh install on another machine behaves identically.
+# `install.bat` installs exactly this file into the local virtual environment.
+#
+# Test-only packages (pytest) are deliberately NOT listed here — the
+# distributed application does not run the test suite.
+
+fastapi==0.138.0
+uvicorn[standard]==0.49.0
+pydantic==2.13.4
+python-docx==1.2.0
+pdfplumber==0.11.10
+openpyxl==3.1.5
+requests==2.34.2

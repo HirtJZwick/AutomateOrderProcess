@@ -18,6 +18,11 @@ output.txt
 ~$*
 OrderTracker.zip
 
+# Hand-over build output (rebuilt by make_dist.ps1; contains a copy of the
+# live database when built with -IncludeDatabase)
+dist/
+OrderTracker/
+
 # Editor
 .vscode/
 .idea/
@@ -33,6 +38,7 @@ install.bat
 
 # Local database (contains live order data, not source code)
 eric_orders.db
+eric_orders.db.bak-*
 make_dist.bat
 
 

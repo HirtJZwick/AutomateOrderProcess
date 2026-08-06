@@ -205,6 +205,7 @@ def refresh_order(dossier: str) -> dict:
         "stage": derive.derive_stage(order),
         "completeness": derive.derive_completeness(order),
         "shipping_date_warning": result.get("shipping_date_warning"),
+        "contacts_warning": result.get("contacts_warning"),
     }
 
 
@@ -229,5 +230,5 @@ def scan_new() -> dict:
 # Serve the pre-built React app for all non-API routes.
 # html=True enables SPA fallback: unknown paths return index.html.
 if os.path.isdir(DIST_DIR):
-    app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="spa")
+    app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="frontend")
 
