@@ -35,6 +35,11 @@ Order_Tracker.bat
 start.bat
 install.bat
 
+# Local developer notes and scratch tooling (not part of the app)
+Implementation.md
+list_sharepoint_folders.py
+serve_network.ps1
+
 
 # Local database (contains live order data, not source code)
 eric_orders.db
