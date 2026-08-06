@@ -105,8 +105,10 @@ export default function OrderDetail({ dossier, onClose, onOrderUpdated }) {
       const res = await api.refreshOrder(dossier);
       setData(res);
       setEdits({});
-      if (res.shipping_date_warning) {
-        setActionError(res.shipping_date_warning);
+      if (res.shipping_date_warning || res.contacts_warning) {
+        setActionError(
+          [res.contacts_warning, res.shipping_date_warning].filter(Boolean).join(" — ")
+        );
       } else {
         setActionMessage(`Refreshed — ${res.documents.length} document(s) found.`);
       }

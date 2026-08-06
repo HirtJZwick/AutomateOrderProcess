@@ -35,6 +35,12 @@ def _raw_config() -> dict:
         # "root_folder" corresponds to on SharePoint.
         "sharepoint_site_url": "",
         "sharepoint_root_path": "",
+        # How long (seconds) to wait for a flow's row to reach the local
+        # OneDrive-synced copy of the result workbooks. The flows answer
+        # HTTP 200 as soon as they have written to SharePoint; the local file
+        # follows once OneDrive has synchronized it, which was measured at
+        # roughly 30 seconds. Set to 0 to disable waiting.
+        "flow_result_timeout_seconds": 90,
     }
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r", encoding="utf-8-sig") as fh:
@@ -61,6 +67,7 @@ def save_config(updates: dict) -> dict:
         "excel_root",
         "sharepoint_site_url",
         "sharepoint_root_path",
+        "flow_result_timeout_seconds",
     ):
         if key in updates and updates[key] is not None:
             cfg[key] = updates[key]

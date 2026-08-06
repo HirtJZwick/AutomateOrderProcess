@@ -234,7 +234,7 @@ def test_refresh_order_returns_shipping_date_warning_when_not_found(api_client, 
     monkeypatch.setattr("power_automate.trigger_shipping_date_flow", lambda dossier_no, folder: True)
     monkeypatch.setattr(
         "excel_sync.lookup_shipping_date",
-        lambda folder: {"shipping_date": None, "reasoning": "No shipping documents uploaded yet", "source_document": None},
+        lambda folder, path=None: {"shipping_date": None, "reasoning": "No shipping documents uploaded yet", "source_document": None},
     )
 
     res = api_client.post("/api/orders/DO022/refresh")

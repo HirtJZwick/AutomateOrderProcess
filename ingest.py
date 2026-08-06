@@ -138,24 +138,37 @@ def ingest_folder(
     all_pdfs = extract_order_pdf.find_all_pdfs(folder)
     if all_pdfs:
         if power_automate.trigger_oc_contacts_flow(folder):
-            data.update(excel_sync.lookup_oc_contacts(folder))
+            try:
+                data.update(excel_sync.wait_for_oc_contacts(folder))
+            except excel_sync.WorkbookUnavailable as exc:
+                data["contacts_warning"] = str(exc)
+                print(f"WARN: {exc}")
         else:
             print(f"WARN: OC contacts flow failed for {folder}")
 
     # Shipping date — same pattern via the Shipping Date flow + workbook.
     shipping_pdfs = extract_order_pdf.find_shipping_pdfs(folder)
     if shipping_pdfs:
+        # Captured before triggering so a generic row already in the workbook
+        # is not mistaken for the one this run produces.
+        workbook_mtime = excel_sync.workbook_mtime()
         flow_triggered = power_automate.trigger_shipping_date_flow(data["dossier_no"], folder)
         if not flow_triggered:
             print(f"WARN: shipping date flow failed for {folder}")
 
-        # Read the workbook regardless of whether the flow trigger itself
-        # succeeded. After HTTP 200, fall back to the latest row because the
-        # current flow writes the generic shipping-subfolder name instead of
-        # the parent order folder into Folder_Name for no-date results.
-        shipping = excel_sync.lookup_shipping_date(folder)
-        if flow_triggered and not shipping:
-            shipping = excel_sync.lookup_latest_shipping_result()
+        # The flow answers HTTP 200 once it has written to SharePoint, but the
+        # local synced copy of the workbook lags behind by a few seconds, so
+        # poll rather than read once.
+        workbook_error = None
+        shipping = {}
+        try:
+            if flow_triggered:
+                shipping = excel_sync.wait_for_shipping_result(folder, workbook_mtime)
+            else:
+                shipping = excel_sync.lookup_shipping_date(folder)
+        except excel_sync.WorkbookUnavailable as exc:
+            workbook_error = str(exc)
+            print(f"WARN: {exc}")
         data["shipping_date_reason"] = shipping.get("reasoning")
         if shipping.get("shipping_date"):
             data["shipping_date"] = shipping["shipping_date"]
@@ -167,6 +180,8 @@ def ingest_folder(
             reasons = []
             if not flow_triggered:
                 reasons.append("the shipping-date flow failed to run")
+            if workbook_error:
+                reasons.append(workbook_error)
             if shipping.get("reasoning"):
                 reasons.append(f"reason: {shipping['reasoning']}")
             warning = f"No shipping date found for {folder}"
@@ -298,6 +313,7 @@ def refresh_order(
         "order": updated_order,
         "documents": documents,
         "shipping_date_warning": (ingest_result or {}).get("shipping_date_warning"),
+        "contacts_warning": (ingest_result or {}).get("contacts_warning"),
     }
 
 

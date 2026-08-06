@@ -244,7 +244,7 @@ def test_ingest_folder_stores_shipping_date_from_flow(tmp_path, monkeypatch):
     monkeypatch.setattr("power_automate.trigger_shipping_date_flow", lambda dossier_no, folder: True)
     monkeypatch.setattr(
         "excel_sync.lookup_shipping_date",
-        lambda folder: {
+        lambda folder, path=None: {
             "shipping_date": "1/29/2026",
             "reasoning": "Found on the invoice",
             "source_document": "Invoice.pdf",
@@ -285,7 +285,7 @@ def test_ingest_folder_sets_warning_when_shipping_date_not_found(tmp_path, monke
     monkeypatch.setattr("power_automate.trigger_shipping_date_flow", lambda dossier_no, folder: True)
     monkeypatch.setattr(
         "excel_sync.lookup_shipping_date",
-        lambda folder: {
+        lambda folder, path=None: {
             "shipping_date": None,
             "reasoning": "No shipping documents uploaded yet",
             "source_document": None,
@@ -318,10 +318,11 @@ def test_ingest_folder_uses_latest_flow_row_when_folder_name_is_generic(tmp_path
         lambda f: [str(folder / "Shipping Documents and Invoices" / "Quote.pdf")],
     )
     monkeypatch.setattr("power_automate.trigger_shipping_date_flow", lambda dossier_no, folder: True)
-    monkeypatch.setattr("excel_sync.lookup_shipping_date", lambda folder: {})
+    _patch_workbook_freshness(monkeypatch)
+    monkeypatch.setattr("excel_sync.lookup_shipping_date", lambda folder, path=None: {})
     monkeypatch.setattr(
         "excel_sync.lookup_latest_shipping_result",
-        lambda: {
+        lambda folder="", path=None: {
             "shipping_date": None,
             "reasoning": "The files only contain freight quotes, not a confirmed shipping date.",
             "source_document": None,
@@ -360,7 +361,7 @@ def test_ingest_folder_sets_warning_when_shipping_date_flow_fails(tmp_path, monk
         lambda f: [str(folder / "Shipping Documents and Invoices" / "Invoice.pdf")],
     )
     monkeypatch.setattr("power_automate.trigger_shipping_date_flow", lambda dossier_no, folder: False)
-    monkeypatch.setattr("excel_sync.lookup_shipping_date", lambda folder: {})
+    monkeypatch.setattr("excel_sync.lookup_shipping_date", lambda folder, path=None: {})
 
     db_path = str(tmp_path / "test.db")
     result = ingest.ingest_folder(str(folder), db_path=db_path)
@@ -390,7 +391,7 @@ def test_ingest_folder_uses_workbook_reason_even_when_flow_trigger_fails(tmp_pat
     monkeypatch.setattr("power_automate.trigger_shipping_date_flow", lambda dossier_no, folder: False)
     monkeypatch.setattr(
         "excel_sync.lookup_shipping_date",
-        lambda folder: {
+        lambda folder, path=None: {
             "shipping_date": None,
             "reasoning": "No shipping documents uploaded yet",
             "source_document": None,
@@ -429,7 +430,7 @@ def test_refresh_order_updates_stale_shipping_date_reason_once_date_is_found(tmp
     # First refresh: no date yet, only a "not found" reason.
     monkeypatch.setattr(
         "excel_sync.lookup_shipping_date",
-        lambda folder: {
+        lambda folder, path=None: {
             "shipping_date": None,
             "reasoning": "No shipping documents uploaded yet",
             "source_document": None,
@@ -446,7 +447,7 @@ def test_refresh_order_updates_stale_shipping_date_reason_once_date_is_found(tmp
     # Second refresh: date now found with a fresh reason.
     monkeypatch.setattr(
         "excel_sync.lookup_shipping_date",
-        lambda folder: {
+        lambda folder, path=None: {
             "shipping_date": "1/29/2026",
             "reasoning": "Found on the invoice",
             "source_document": "Invoice.pdf",
@@ -504,7 +505,7 @@ def test_ingest_folder_stores_contacts_from_flow(tmp_path, monkeypatch):
     monkeypatch.setattr("power_automate.trigger_oc_contacts_flow", lambda folder: True)
     monkeypatch.setattr(
         "excel_sync.lookup_oc_contacts",
-        lambda folder: {"logistics_coordinator": "Jane Doe", "rsm": "John Smith"},
+        lambda folder, path=None: {"logistics_coordinator": "Jane Doe", "rsm": "John Smith"},
     )
 
     db_path = str(tmp_path / "test.db")
@@ -530,7 +531,7 @@ def test_ingest_folder_skips_excel_lookup_when_flow_fails(tmp_path, monkeypatch)
     monkeypatch.setattr("extract_order_pdf.extract", lambda p: {})
     monkeypatch.setattr("power_automate.trigger_oc_contacts_flow", lambda folder: False)
 
-    def _fail_if_called(folder):
+    def _fail_if_called(folder, path=None):
         raise AssertionError("lookup_oc_contacts should not be called when the flow failed")
 
     monkeypatch.setattr("excel_sync.lookup_oc_contacts", _fail_if_called)

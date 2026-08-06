@@ -1,7 +1,10 @@
 {
-  "root_folder": "C:\\Users\\Hirtj\\OneDrive - ZwickRoell GmbH & Co. KG\\Documents\\EricProject",
+  "root_folder": "C:\\Users\\Hirtj\\OneDrive - ZwickRoell GmbH & Co. KG\\ZRG ZRNA - Website_Order_Folder",
   "db_path": "eric_orders.db",
   "oc_contacts_flow_url": "",
   "shipping_date_flow_url": "",
-  "excel_root": ""
+  "excel_root": "C:\\Users\\Hirtj\\OneDrive - ZwickRoell GmbH & Co. KG\\ZRG ZRNA - Website_Order_Folder",
+  "sharepoint_site_url": "",
+  "sharepoint_root_path": "",
+  "flow_result_timeout_seconds": 90
 }
