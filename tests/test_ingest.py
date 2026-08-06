@@ -97,6 +97,20 @@ def test_find_shipping_pdfs_finds_invoice_shipping_and_quote_files(tmp_path):
     }
 
 
+def test_find_shipping_pdfs_skips_number_only_filenames(tmp_path):
+    """Carrier invoices named after their number alone do not match."""
+    shipping_dir = tmp_path / "Shipping Documents and Invoices"
+    shipping_dir.mkdir()
+    (shipping_dir / "1447745.pdf").write_bytes(b"")
+    assert extract_order_pdf.find_shipping_pdfs(str(tmp_path)) == []
+
+
+def test_has_shipping_subfolder_detects_the_folder(tmp_path):
+    assert extract_order_pdf.has_shipping_subfolder(str(tmp_path)) is False
+    (tmp_path / "Shipping Documents and Invoices").mkdir()
+    assert extract_order_pdf.has_shipping_subfolder(str(tmp_path)) is True
+
+
 def test_find_shipping_pdfs_ignores_invoices_outside_subfolder(tmp_path):
     # Invoice PDF sitting in a different subfolder must not be picked up.
     other_dir = tmp_path / "Other Docs"
@@ -1199,3 +1213,90 @@ def test_order_group_for_folder_returns_none_outside_root(tmp_path):
     assert ingest.order_group_for_folder(str(root), str(outside)) is None
     assert ingest.order_group_for_folder(str(root), str(root)) is None
     assert ingest.order_group_for_folder("", str(root)) is None
+
+
+# ── shipping folder exists but nothing in it matched the filter ─────────────
+
+def _patch_no_flow_extraction(monkeypatch, folder, dossier_no):
+    monkeypatch.setattr(
+        "extract_checklist.find_checklist", lambda f: str(folder / "Checklist.docx")
+    )
+    monkeypatch.setattr(
+        "extract_checklist.extract", lambda p: {"dossier_no": dossier_no, "customer_name": "Corp"}
+    )
+    monkeypatch.setattr("extract_order_pdf.find_all_pdfs", lambda f: [])
+    monkeypatch.setattr("extract_order_pdf.find_order_pdf", lambda f: None)
+
+
+def test_ingest_folder_reports_unmatched_shipping_folder(tmp_path, monkeypatch):
+    """The folder exists but holds only e.g. '1447745.pdf' — say so."""
+    folder = tmp_path / "DO700 Bosch"
+    shipping = folder / "Shipping Documents and Invoices"
+    shipping.mkdir(parents=True)
+    (shipping / "1447745.pdf").write_bytes(b"")
+    _patch_no_flow_extraction(monkeypatch, folder, "DO700")
+
+    def _must_not_run(dossier_no, folder):
+        raise AssertionError("the shipping flow must not be triggered")
+
+    monkeypatch.setattr("power_automate.trigger_shipping_date_flow", _must_not_run)
+
+    db_path = str(tmp_path / "test.db")
+    result = ingest.ingest_folder(str(folder), db_path=db_path)
+
+    assert result["shipping_date_reason"] == ingest.NO_MATCHING_SHIPPING_DOCS_REASON
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    assert storage.get_order(conn, "DO700")["shipping_date_reason"] == (
+        ingest.NO_MATCHING_SHIPPING_DOCS_REASON
+    )
+    conn.close()
+
+
+def test_ingest_folder_stays_silent_without_a_shipping_folder(tmp_path, monkeypatch):
+    folder = tmp_path / "DO701 Bosch"
+    folder.mkdir()
+    _patch_no_flow_extraction(monkeypatch, folder, "DO701")
+
+    result = ingest.ingest_folder(str(folder), db_path=str(tmp_path / "test.db"))
+
+    assert result.get("shipping_date_reason") is None
+
+
+def test_ingest_folder_does_not_contradict_a_known_shipping_date(tmp_path, monkeypatch):
+    """A date already on record must not be overwritten by the hint."""
+    folder = tmp_path / "DO702 Bosch"
+    shipping = folder / "Shipping Documents and Invoices"
+    shipping.mkdir(parents=True)
+    (shipping / "1447745.pdf").write_bytes(b"")
+    db_path = str(tmp_path / "test.db")
+
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    storage.upsert_order(conn, {"dossier_no": "DO702", "shipping_date": "3/6/2026"})
+    conn.close()
+
+    _patch_no_flow_extraction(monkeypatch, folder, "DO702")
+    result = ingest.ingest_folder(str(folder), db_path=db_path, merge="fill_empty")
+
+    assert result.get("shipping_date_reason") is None
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    order = storage.get_order(conn, "DO702")
+    conn.close()
+    assert order["shipping_date"] == "3/6/2026"
+    assert not order["shipping_date_reason"]
+
+
+def test_refresh_order_shows_hint_for_unmatched_shipping_folder(tmp_path, monkeypatch):
+    folder = tmp_path / "DO703 Bosch"
+    shipping = folder / "Shipping Documents and Invoices"
+    shipping.mkdir(parents=True)
+    (shipping / "1447745.pdf").write_bytes(b"")
+    db_path = str(tmp_path / "test.db")
+
+    _patch_no_flow_extraction(monkeypatch, folder, "DO703")
+    ingest.ingest_folder(str(folder), db_path=db_path)
+    result = ingest.refresh_order("DO703", db_path=db_path)
+
+    assert result["order"]["shipping_date_reason"] == ingest.NO_MATCHING_SHIPPING_DOCS_REASON

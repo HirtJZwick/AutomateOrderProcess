@@ -111,6 +111,16 @@ def find_shipping_pdfs(folder: str) -> list[str]:
     return sorted(hits)
 
 
+def has_shipping_subfolder(folder: str) -> bool:
+    """True when the order has a 'Shipping Documents and Invoices' subfolder.
+
+    Lets the caller distinguish "this order has no shipping paperwork at all"
+    from "shipping paperwork exists but nothing in it matched
+    `find_shipping_pdfs()`" — the latter is worth telling the user about.
+    """
+    return os.path.isdir(os.path.join(folder, SHIPPING_SUBFOLDER))
+
+
 def main(argv):
     path = argv[1] if len(argv) > 1 else find_order_pdf(os.path.dirname(os.path.abspath(__file__)))
     if not path or not os.path.exists(path):

@@ -56,6 +56,14 @@ import extract_order_pdf
 import power_automate
 import storage
 
+# Shown as the shipping-date hint (the "i" label) when an order has a
+# "Shipping Documents and Invoices" folder but nothing inside it looks like a
+# shipping document, so the shipping-date flow is never triggered.
+NO_MATCHING_SHIPPING_DOCS_REASON = (
+    "No shipping date was found although the Shipping documents and Invoices "
+    "folder exist for this order"
+)
+
 # Filename-substring -> document category, for the documents list / completeness.
 _DOC_CATEGORIES = [
     ("checklist", "Checklist"),
@@ -76,6 +84,26 @@ def categorize(file_name: str) -> str:
         if sub in low:
             return cat
     return "Other"
+
+
+def _stored_shipping_date(dossier_no: str, db_path: str) -> str:
+    """The shipping date already recorded for `dossier_no`, or "".
+
+    Used to avoid contradicting a date that is already known (typically entered
+    by hand) with a "no shipping date was found" hint.
+    """
+    try:
+        conn = storage.connect(db_path)
+    except Exception:
+        return ""
+    try:
+        storage.init_db(conn)
+        order = storage.get_order(conn, dossier_no)
+    except Exception:
+        return ""
+    finally:
+        conn.close()
+    return (order or {}).get("shipping_date") or ""
 
 
 def list_documents(folder: str) -> list[dict]:
@@ -189,8 +217,18 @@ def ingest_folder(
                 warning += " — " + "; ".join(reasons)
             data["shipping_date_warning"] = warning
             print(warning)
+    elif extract_order_pdf.has_shipping_subfolder(folder):
+        # Shipping paperwork exists, but no file in it matched
+        # `find_shipping_pdfs()` (no "shipping"/"invoice"/"quote" in the name),
+        # so the flow is never triggered. Say so via the shipping-date hint
+        # instead of leaving the field silently blank.
+        if not _stored_shipping_date(data["dossier_no"], db_path):
+            data["shipping_date_reason"] = NO_MATCHING_SHIPPING_DOCS_REASON
+            print(f"{NO_MATCHING_SHIPPING_DOCS_REASON}: {folder}")
 
-    data["source_folder"] = folder
+    data["source_folder"] = to_stored_folder(folder)
+    if order_group:
+        data["order_group"] = order_group
     if "cancelled" in os.path.basename(folder).lower():
         data["cancelled"] = "1"
 
