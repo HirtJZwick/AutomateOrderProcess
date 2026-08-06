@@ -25,6 +25,16 @@ def _raw_config() -> dict:
         "oc_contacts_flow_url": "",
         "shipping_date_flow_url": "",
         "excel_root": "",
+        # Optional overrides for translating the local synced order folder into
+        # the SharePoint path the flows need. Leave blank to let
+        # power_automate.py detect it automatically from the Windows OneDrive
+        # sync-root registry. Set them when auto-detection is unavailable, e.g.
+        #   "sharepoint_site_url":  "https://contoso.sharepoint.com/sites/MySite"
+        #   "sharepoint_root_path": "/Shared Documents/General/Order_Folder"
+        # where sharepoint_root_path is the site-relative path that
+        # "root_folder" corresponds to on SharePoint.
+        "sharepoint_site_url": "",
+        "sharepoint_root_path": "",
     }
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r", encoding="utf-8-sig") as fh:
@@ -49,6 +59,8 @@ def save_config(updates: dict) -> dict:
         "oc_contacts_flow_url",
         "shipping_date_flow_url",
         "excel_root",
+        "sharepoint_site_url",
+        "sharepoint_root_path",
     ):
         if key in updates and updates[key] is not None:
             cfg[key] = updates[key]
