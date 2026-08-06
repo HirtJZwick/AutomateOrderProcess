@@ -125,10 +125,98 @@ def list_documents(folder: str) -> list[dict]:
     return docs
 
 
+def _configured_root() -> str:
+    """The configured scan root, or "" when unset or unreadable."""
+    try:
+        from webapp.backend.settings import load_config
+
+        return (load_config().get("root_folder") or "").strip()
+    except Exception:
+        return ""
+
+
+def to_stored_folder(folder: str) -> str:
+    """The value to persist in `orders.source_folder` for an on-disk `folder`.
+
+    Order folders live in a shared SharePoint library that every user
+    synchronizes to a *different* absolute path (`C:\\Users\\<name>\\OneDrive -
+    ...`, or wherever they put the shortcut). Storing the absolute path makes
+    the database machine-specific: on any other PC every order reports "no
+    valid source_folder on disk" until a full rescan rebinds all of them.
+
+    Folders under the configured scan root are therefore stored *relative* to
+    it (`Order_Folders/DO748089 Onboarding Systems OPP396866`), which is
+    identical on every machine because it mirrors the SharePoint structure.
+    Forward slashes are used, matching `order_documents.rel_path`.
+
+    Anything outside the root — or any path at all while no root is configured
+    — is stored unchanged, so nothing is ever lost or silently mangled.
+    """
+    root = _configured_root()
+    if not root or not folder:
+        return folder
+    try:
+        relative = os.path.relpath(os.path.normpath(folder), os.path.normpath(root))
+    except ValueError:  # different drives on Windows
+        return folder
+    parts = relative.split(os.sep)
+    if not parts or parts[0] in ("", os.curdir, os.pardir):
+        return folder  # not under the root
+    return "/".join(parts)
+
+
+def resolve_source_folder(stored: str) -> str:
+    """The absolute on-disk path for a stored `source_folder` value.
+
+    Accepts both forms: a root-relative path (what `to_stored_folder()` now
+    writes) is joined onto the configured scan root, while an absolute path —
+    written by older versions, or pointing somewhere outside the root — is
+    returned unchanged. That fallback is what lets an existing database keep
+    working without a migration.
+    """
+    stored = (stored or "").strip()
+    if not stored or os.path.isabs(stored):
+        return stored
+    root = _configured_root()
+    if not root:
+        return stored
+    return os.path.normpath(os.path.join(root, stored))
+
+
+def migrate_source_folders_to_relative(db_path: str = storage.DEFAULT_DB) -> int:
+    """Rewrite absolute `source_folder` values as root-relative ones.
+
+    Makes an existing database portable in place. Rows already relative, and
+    rows pointing outside the configured root, are left untouched. Returns the
+    number of rows rewritten.
+
+    Re-running this is harmless, and skipping it entirely is safe too:
+    `resolve_source_folder()` still understands absolute values, and the next
+    `scan_new()` rebinds whatever it finds.
+    """
+    if not _configured_root():
+        return 0
+    conn = storage.connect(db_path)
+    try:
+        storage.init_db(conn)
+        migrated = 0
+        for dossier_no, stored in storage.list_dossier_source_folders(conn):
+            if not os.path.isabs(stored):
+                continue
+            relative = to_stored_folder(stored)
+            if relative != stored:
+                storage.update_source_folder(conn, dossier_no, relative)
+                migrated += 1
+        return migrated
+    finally:
+        conn.close()
+
+
 def ingest_folder(
     folder: str,
     db_path: str = storage.DEFAULT_DB,
     merge: str = "overwrite",
+    order_group: str | None = None,
 ) -> dict | None:
     """Extract one order from `folder` and write it to the DB.
 

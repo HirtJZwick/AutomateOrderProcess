@@ -1300,3 +1300,129 @@ def test_refresh_order_shows_hint_for_unmatched_shipping_folder(tmp_path, monkey
     result = ingest.refresh_order("DO703", db_path=db_path)
 
     assert result["order"]["shipping_date_reason"] == ingest.NO_MATCHING_SHIPPING_DOCS_REASON
+
+
+# ── portable (root-relative) source_folder ────────────────────────────────────
+
+def test_to_stored_folder_strips_the_configured_root(tmp_path, monkeypatch):
+    root = tmp_path / "Root"
+    _patch_config_root(monkeypatch, root)
+    folder = root / "Order_Folders" / "DO900 ACME"
+    assert ingest.to_stored_folder(str(folder)) == "Order_Folders/DO900 ACME"
+
+
+def test_to_stored_folder_keeps_paths_outside_the_root(tmp_path, monkeypatch):
+    _patch_config_root(monkeypatch, tmp_path / "Root")
+    outside = tmp_path / "Elsewhere" / "DO901 ACME"
+    assert ingest.to_stored_folder(str(outside)) == str(outside)
+
+
+def test_to_stored_folder_is_a_noop_without_a_configured_root(tmp_path):
+    folder = tmp_path / "Order_Folders" / "DO902 ACME"
+    assert ingest.to_stored_folder(str(folder)) == str(folder)
+
+
+def test_resolve_source_folder_round_trips(tmp_path, monkeypatch):
+    root = tmp_path / "Root"
+    _patch_config_root(monkeypatch, root)
+    folder = root / "Order_Folders" / "DO903 ACME"
+    stored = ingest.to_stored_folder(str(folder))
+    assert os.path.normcase(ingest.resolve_source_folder(stored)) == os.path.normcase(str(folder))
+
+
+def test_resolve_source_folder_passes_absolute_values_through(tmp_path, monkeypatch):
+    _patch_config_root(monkeypatch, tmp_path / "Root")
+    legacy = str(tmp_path / "OldRoot" / "Order_Folders" / "DO904 ACME")
+    assert ingest.resolve_source_folder(legacy) == legacy
+
+
+def test_relative_source_folder_resolves_under_a_different_root(tmp_path, monkeypatch):
+    """The same DB row works on another machine whose sync root differs."""
+    stored = "Order_Folders/DO905 ACME"
+    for root_name in ("RootA", "RootB"):
+        root = tmp_path / root_name
+        _patch_config_root(monkeypatch, root)
+        expected = root / "Order_Folders" / "DO905 ACME"
+        assert os.path.normcase(ingest.resolve_source_folder(stored)) == os.path.normcase(
+            str(expected)
+        )
+
+
+def test_scan_new_stores_source_folder_relative_to_the_root(tmp_path, monkeypatch):
+    root = tmp_path / "Root"
+    folder = root / "New_Machines_Order_Folder" / "DO906 ACME"
+    folder.mkdir(parents=True)
+    (folder / "Checklist DO906.docx").write_bytes(b"")
+    db_path = str(tmp_path / "test.db")
+
+    _patch_config_root(monkeypatch, root)
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO906", "customer_name": "ACME"})
+    ingest.scan_new(str(root), db_path=db_path)
+
+    conn = storage.connect(db_path)
+    order = storage.get_order(conn, "DO906")
+    conn.close()
+    assert order["source_folder"] == "New_Machines_Order_Folder/DO906 ACME"
+
+
+def test_scan_new_does_not_rebind_already_relative_paths(tmp_path, monkeypatch):
+    """A second scan must be a no-op, not an endless rebind of every order."""
+    root = tmp_path / "Root"
+    folder = root / "Order_Folders" / "DO907 ACME"
+    folder.mkdir(parents=True)
+    (folder / "Checklist DO907.docx").write_bytes(b"")
+    db_path = str(tmp_path / "test.db")
+
+    _patch_config_root(monkeypatch, root)
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO907", "customer_name": "ACME"})
+    ingest.scan_new(str(root), db_path=db_path)
+    result = ingest.scan_new(str(root), db_path=db_path)
+
+    assert result["rebound"] == []
+    assert result["ingested"] == []
+
+
+def test_migrate_source_folders_rewrites_absolute_rows(tmp_path, monkeypatch):
+    root = tmp_path / "Root"
+    folder = root / "Order_Folders" / "DO908 ACME"
+    folder.mkdir(parents=True)
+    db_path = str(tmp_path / "test.db")
+
+    conn = storage.connect(db_path)
+    storage.init_db(conn)
+    storage.upsert_order(conn, {"dossier_no": "DO908", "source_folder": str(folder)})
+    storage.upsert_order(
+        conn, {"dossier_no": "DO909", "source_folder": str(tmp_path / "Elsewhere" / "DO909")}
+    )
+    conn.close()
+
+    _patch_config_root(monkeypatch, root)
+    assert ingest.migrate_source_folders_to_relative(db_path) == 1
+
+    conn = storage.connect(db_path)
+    assert storage.get_order(conn, "DO908")["source_folder"] == "Order_Folders/DO908 ACME"
+    assert storage.get_order(conn, "DO909")["source_folder"] == str(
+        tmp_path / "Elsewhere" / "DO909"
+    )
+    conn.close()
+
+    _patch_config_root(monkeypatch, root)
+    assert ingest.migrate_source_folders_to_relative(db_path) == 0
+
+
+def test_refresh_order_works_from_a_relative_source_folder(tmp_path, monkeypatch):
+    root = tmp_path / "Root"
+    folder = root / "Order_Folders" / "DO910 ACME"
+    folder.mkdir(parents=True)
+    (folder / "Checklist DO910.docx").write_bytes(b"")
+    db_path = str(tmp_path / "test.db")
+
+    _patch_config_root(monkeypatch, root)
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO910", "customer_name": "ACME"})
+    ingest.scan_new(str(root), db_path=db_path)
+
+    _patch_extraction(monkeypatch, folder, {"dossier_no": "DO910", "industry": "Automotive"})
+    result = ingest.refresh_order("DO910", db_path=db_path)
+
+    assert result["order"]["industry"] == "Automotive"
+    assert result["order"]["source_folder"] == "Order_Folders/DO910 ACME"
