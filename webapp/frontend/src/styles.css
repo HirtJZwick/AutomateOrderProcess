@@ -130,7 +130,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 12px 28px;
+  padding: 18px 28px 12px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -222,6 +222,44 @@ body {
   color: #fff;
   white-space: nowrap;
 }
+
+/* Second filter row: one button per order group (root subfolder). */
+.group-bar {
+  padding-top: 10px;
+}
+
+/* Customer search box in the filter bar */
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.search-input {
+  width: 220px;
+  padding: 5px 26px 5px 13px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+}
+.search-input::placeholder { color: var(--muted); }
+.search-input:focus { outline: none; border-color: var(--accent); }
+.search-input::-webkit-search-cancel-button { display: none; }
+
+.search-clear {
+  position: absolute;
+  right: 8px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.search-clear:hover { color: var(--accent); }
 
 .card-meta { margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
 .meta-item .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }

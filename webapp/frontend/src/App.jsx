@@ -6,6 +6,7 @@ import { STAGE_COLORS, stageColor, ACTIVE_COLOR } from "./colors";
 
 const STAGES = ["New", "Order Confirmed", "Packed", "Shipped"];
 const CANCELLED_COLOR = "#d32f2f";
+const GROUP_COLOR = "#5c6bc0";
 
 // Parse OC date strings into a Date for sorting. Handles both US (M/D/YYYY)
 // and European (DD.MM.YYYY) formats, with or without a time component.
@@ -40,6 +41,8 @@ export default function App() {
   const [scanning, setScanning] = useState(false);
   const [scanningNew, setScanningNew] = useState(false);
   const [activeFilter, setActiveFilter] = useState(null); // null = All
+  const [groupFilter, setGroupFilter] = useState(null); // null = all subfolders
+  const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
@@ -172,17 +175,29 @@ export default function App() {
     }
   }
 
-  const activeOrders = orders.filter((o) => o.is_active);
+  const orderGroups = [...new Set(orders.map((o) => o.order_group).filter(Boolean))].sort();
+
+  // The customer search and the subfolder (order group) filter both narrow the
+  // pool that every stage/Active/Cancelled filter and count works on.
+  const query = search.trim().toLowerCase();
+  const searchOrders = query
+    ? orders.filter((o) => (o.customer_name || "").toLowerCase().includes(query))
+    : orders;
+  const groupOrders = groupFilter
+    ? searchOrders.filter((o) => o.order_group === groupFilter)
+    : searchOrders;
+
+  const activeOrders = groupOrders.filter((o) => o.is_active);
 
   const filteredOrders = (() => {
-    if (activeFilter === "Cancelled") return orders.filter((o) => o.cancelled === "1");
+    if (activeFilter === "Cancelled") return groupOrders.filter((o) => o.cancelled === "1");
     if (activeFilter === "Active") {
       return [...activeOrders].sort(
         (a, b) => parseOCDate(b.received_oc_from_zrx) - parseOCDate(a.received_oc_from_zrx)
       );
     }
-    if (activeFilter) return orders.filter((o) => o.stage?.name === activeFilter);
-    return orders;
+    if (activeFilter) return groupOrders.filter((o) => o.stage?.name === activeFilter);
+    return groupOrders;
   })();
 
   return (
@@ -287,10 +302,10 @@ export default function App() {
           className={`filter-btn${activeFilter === null ? " active" : ""}`}
           onClick={() => setActiveFilter(null)}
         >
-          All <span className="filter-count">{orders.length}</span>
+          All <span className="filter-count">{groupOrders.length}</span>
         </button>
         {STAGES.map((stage) => {
-          const count = orders.filter((o) => o.stage?.name === stage).length;
+          const count = groupOrders.filter((o) => o.stage?.name === stage).length;
           return (
             <button
               key={stage}
@@ -302,7 +317,7 @@ export default function App() {
             </button>
           );
         })}
-        {orders.some((o) => o.is_active) && (
+        {groupOrders.some((o) => o.is_active) && (
           <button
             className={`filter-btn${activeFilter === "Active" ? " active" : ""}`}
             style={activeFilter === "Active" ? { background: ACTIVE_COLOR, borderColor: ACTIVE_COLOR, color: "#fff" } : { "--hover-color": ACTIVE_COLOR }}
@@ -311,16 +326,31 @@ export default function App() {
             Active <span className="filter-count">{activeOrders.length}</span>
           </button>
         )}
-        {orders.some((o) => o.cancelled === "1") && (
+        {groupOrders.some((o) => o.cancelled === "1") && (
           <button
             className={`filter-btn${activeFilter === "Cancelled" ? " active" : ""}`}
             style={activeFilter === "Cancelled" ? { background: CANCELLED_COLOR, borderColor: CANCELLED_COLOR, color: "#fff" } : { "--hover-color": CANCELLED_COLOR }}
             onClick={() => setActiveFilter(activeFilter === "Cancelled" ? null : "Cancelled")}
           >
-            Cancelled <span className="filter-count">{orders.filter((o) => o.cancelled === "1").length}</span>
+            Cancelled <span className="filter-count">{groupOrders.filter((o) => o.cancelled === "1").length}</span>
           </button>
         )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <div className="search-box">
+            <input
+              type="search"
+              className="search-input"
+              placeholder="Search customer…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search orders by customer name"
+            />
+            {search && (
+              <button className="search-clear" onClick={() => setSearch("")} title="Clear search">
+                ×
+              </button>
+            )}
+          </div>
           <button className="btn secondary" onClick={handleScanNew} disabled={scanningNew || !rootExists}>
             {scanningNew ? "Scanning…" : "Scan new orders"}
           </button>
@@ -330,11 +360,45 @@ export default function App() {
         </div>
       </div>
 
+      {orderGroups.length > 1 && (
+        <div className="filter-bar group-bar">
+          <button
+            className={`filter-btn${groupFilter === null ? " active" : ""}`}
+            style={groupFilter === null ? { background: GROUP_COLOR, borderColor: GROUP_COLOR, color: "#fff" } : { "--hover-color": GROUP_COLOR }}
+            onClick={() => setGroupFilter(null)}
+          >
+            All folders <span className="filter-count">{searchOrders.length}</span>
+          </button>
+          {orderGroups.map((group) => (
+            <button
+              key={group}
+              className={`filter-btn${groupFilter === group ? " active" : ""}`}
+              style={groupFilter === group ? { background: GROUP_COLOR, borderColor: GROUP_COLOR, color: "#fff" } : { "--hover-color": GROUP_COLOR }}
+              onClick={() => setGroupFilter(groupFilter === group ? null : group)}
+            >
+              {group}{" "}
+              <span className="filter-count">
+                {searchOrders.filter((o) => o.order_group === group).length}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="container">
         {orders.length === 0 ? (
           <div className="empty">
             <h2>No orders yet</h2>
             <p>Set the scan folder above, then click “Scan orders” to load orders.</p>
+          </div>
+        ) : filteredOrders.length === 0 ? (
+          <div className="empty">
+            <h2>No matching orders</h2>
+            <p>
+              {query
+                ? `No customer matches “${search.trim()}”.`
+                : "No orders match the selected filters."}
+            </p>
           </div>
         ) : (
           <div className="grid">
